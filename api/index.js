@@ -6,222 +6,324 @@ app.use(express.json({ limit: '5mb' }));
 // CORS
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, PUT, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, PUT, POST, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(204).end();
   next();
 });
 
 // ─────────────────────────────────────────────────────────────────
-// Storage layer
-//   • Uses Vercel Blob when BLOB_READ_WRITE_TOKEN is present
-//     (set automatically when you create a Blob store from
-//      Vercel Storage → Blob → Create and connect to the project).
-//   • Falls back to in-memory store when the env var is missing
-//     (local dev, or while the integration is not yet attached).
+// Storage layer (Vercel Blob if available, else in-memory)
 // ─────────────────────────────────────────────────────────────────
 let storage;
 const hasBlob = !!process.env.BLOB_READ_WRITE_TOKEN;
 
 if (hasBlob) {
   const blob = require('@vercel/blob');
-  const PATHNAME = (mode) => `kabi/reports/${mode}.json`;
 
   storage = {
     backend: 'blob',
-    async get(mode) {
+    async getJSON(pathname) {
       try {
-        // Look up the blob by exact pathname (returns URL we can fetch)
-        const { blobs } = await blob.list({ prefix: PATHNAME(mode), limit: 5 });
+        const { blobs } = await blob.list({ prefix: pathname, limit: 5 });
         if (!blobs.length) return null;
-        const match = blobs.find((b) => b.pathname === PATHNAME(mode)) || blobs[0];
-        // Cache-bust to avoid stale CDN reads right after a write
+        const match = blobs.find((b) => b.pathname === pathname) || blobs[0];
         const res = await fetch(match.url + '?t=' + Date.now(), { cache: 'no-store' });
         if (!res.ok) return null;
         return await res.json();
       } catch (err) {
-        console.error('[Blob] get error:', err);
+        console.error('[Blob] get error:', pathname, err);
         return null;
       }
     },
-    async set(mode, value) {
-      await blob.put(PATHNAME(mode), JSON.stringify(value), {
+    async setJSON(pathname, value) {
+      await blob.put(pathname, JSON.stringify(value), {
         access: 'public',
         addRandomSuffix: false,
         allowOverwrite: true,
         contentType: 'application/json',
-        cacheControlMaxAge: 0   // disable CDN caching for read-after-write
+        cacheControlMaxAge: 0
       });
+    },
+    async deleteByPathname(pathname) {
+      try {
+        const { blobs } = await blob.list({ prefix: pathname, limit: 5 });
+        const match = blobs.find((b) => b.pathname === pathname);
+        if (match) await blob.del(match.url);
+      } catch (err) {
+        console.error('[Blob] delete error:', pathname, err);
+      }
+    },
+    async listPrefix(prefix) {
+      try {
+        const { blobs } = await blob.list({ prefix });
+        // For each, return pathname + the parsed body
+        const out = [];
+        for (const b of blobs) {
+          try {
+            const res = await fetch(b.url + '?t=' + Date.now(), { cache: 'no-store' });
+            if (res.ok) out.push({ pathname: b.pathname, data: await res.json(), uploadedAt: b.uploadedAt });
+          } catch (e) { /* skip */ }
+        }
+        return out;
+      } catch (err) {
+        console.error('[Blob] list error:', prefix, err);
+        return [];
+      }
     }
   };
 } else {
-  const mem = { weekly: null, monthly: null, quarterly: null };
+  const mem = {};
   storage = {
     backend: 'memory',
-    async get(mode)        { return mem[mode]; },
-    async set(mode, value) { mem[mode] = value; }
+    async getJSON(pathname)  { return mem[pathname] || null; },
+    async setJSON(pathname, value) { mem[pathname] = value; },
+    async deleteByPathname(pathname) { delete mem[pathname]; },
+    async listPrefix(prefix) {
+      return Object.keys(mem).filter((k) => k.startsWith(prefix))
+        .map((k) => ({ pathname: k, data: mem[k], uploadedAt: new Date().toISOString() }));
+    }
   };
 }
 
-const VALID = new Set(['weekly', 'monthly', 'quarterly']);
-const clean = (s) => String(s || '').slice(0, 100).replace(/[<>"']/g, '');
-const emptyState = () => ({ data: null, version: 0, history: [] });
+const VALID_MODE = new Set(['weekly', 'monthly', 'quarterly']);
+const sanitize  = (s) => String(s || '').slice(0, 100).replace(/[<>"']/g, '');
+const cleanPeriod = (p) => String(p || '').replace(/[^A-Za-z0-9 _·.-]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80);
+const periodKey   = (p) => cleanPeriod(p).replace(/[\s·]+/g, '-');   // pathname-safe
+const DRAFT_PATH   = (mode) => `kabi/reports/${mode}.json`;
+const ARCHIVE_PATH = (mode, period) => `kabi/archive/${mode}/${periodKey(period)}.json`;
+const ARCHIVE_PREFIX = (mode) => `kabi/archive/${mode}/`;
+const emptyDraft = () => ({ data: null, version: 0, history: [] });
 
 // ── Health ──
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', ts: new Date().toISOString(), storage: storage.backend });
 });
 
-// ── GET current report for a mode ──
+// ── Current draft endpoints ──
 app.get('/api/reports/:mode', async (req, res) => {
   const { mode } = req.params;
-  if (!VALID.has(mode)) return res.status(400).json({ error: 'Invalid mode' });
-  try {
-    const state = (await storage.get(mode)) || emptyState();
-    res.json({ data: state.data, version: state.version });
-  } catch (err) {
-    res.status(500).json({ error: 'Storage error', detail: String(err) });
-  }
+  if (!VALID_MODE.has(mode)) return res.status(400).json({ error: 'Invalid mode' });
+  const state = (await storage.getJSON(DRAFT_PATH(mode))) || emptyDraft();
+  res.json({ data: state.data, version: state.version });
 });
 
-// ── GET version only ──
 app.get('/api/reports/:mode/version', async (req, res) => {
   const { mode } = req.params;
-  if (!VALID.has(mode)) return res.status(400).json({ error: 'Invalid mode' });
+  if (!VALID_MODE.has(mode)) return res.status(400).json({ error: 'Invalid mode' });
+  const state = (await storage.getJSON(DRAFT_PATH(mode))) || emptyDraft();
+  res.json({ version: state.version });
+});
+
+app.put('/api/reports/:mode', async (req, res) => {
+  const { mode } = req.params;
+  if (!VALID_MODE.has(mode)) return res.status(400).json({ error: 'Invalid mode' });
+  const { data, user } = req.body;
+  if (!data) return res.status(400).json({ error: 'Missing data' });
+  const state = (await storage.getJSON(DRAFT_PATH(mode))) || emptyDraft();
+  state.data = data;
+  state.version++;
+  const savedAt = new Date().toISOString();
+  state.history.push({
+    id: state.history.length + 1,
+    version: state.version,
+    saved_by: sanitize(user || 'anonymous'),
+    saved_at: savedAt
+  });
+  if (state.history.length > 50) state.history = state.history.slice(-50);
+  await storage.setJSON(DRAFT_PATH(mode), state);
+  res.json({ ok: true, version: state.version, savedAt });
+});
+
+// Clear the current draft (used when monthly/quarterly is archived)
+app.delete('/api/reports/:mode', async (req, res) => {
+  const { mode } = req.params;
+  if (!VALID_MODE.has(mode)) return res.status(400).json({ error: 'Invalid mode' });
+  await storage.setJSON(DRAFT_PATH(mode), emptyDraft());
+  res.json({ ok: true, cleared: true });
+});
+
+app.get('/api/reports/:mode/history', async (req, res) => {
+  const { mode } = req.params;
+  if (!VALID_MODE.has(mode)) return res.status(400).json({ error: 'Invalid mode' });
+  const state = (await storage.getJSON(DRAFT_PATH(mode))) || emptyDraft();
+  const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+  const items = state.history.slice(-limit).reverse();
+  res.json({ history: items });
+});
+
+// ── Archive endpoints ──
+// Schema for an archived entry:
+//   { period: "April 2026",
+//     sections: { ops: {...}, hcdev: {...}, ... },
+//     savedAt:  { ops: "ISO", hcdev: "ISO", ... },
+//     lastSavedAt: "ISO",  lastSavedBy: "name",  mode }
+//
+// Legacy entries used `{ period, data, saved_by, saved_at, mode }` where `data.secs.{secId}`
+// held each section. We migrate-on-read so old entries still appear correctly.
+
+function normalizeArchiveEntry(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  if (entry.sections && typeof entry.sections === 'object') return entry;
+  // Legacy migration
+  if (entry.data && entry.data.secs) {
+    return {
+      period: entry.period,
+      sections: { ...entry.data.secs },
+      savedAt: {},
+      lastSavedAt: entry.saved_at,
+      lastSavedBy: entry.saved_by,
+      mode: entry.mode,
+      _legacyData: entry.data       // keep original for backward fetch
+    };
+  }
+  return entry;
+}
+
+// PUT: save/update ONE section in an archive entry (per-section save).
+// Body: { period: "April 2026", sectionId: "ops", sectionData: {...}, user: "..." }
+app.put('/api/archive/:mode/:period', async (req, res) => {
+  const { mode } = req.params;
+  const periodSlug = decodeURIComponent(req.params.period || '');
+  if (!VALID_MODE.has(mode)) return res.status(400).json({ error: 'Invalid mode' });
+  if (!periodSlug) return res.status(400).json({ error: 'Missing period slug' });
+
+  const { period, sectionId, sectionData, user } = req.body || {};
+  if (!period || !sectionId || !sectionData) {
+    return res.status(400).json({ error: 'Missing period, sectionId, or sectionData' });
+  }
+
   try {
-    const state = (await storage.get(mode)) || emptyState();
-    res.json({ version: state.version });
+    const path = ARCHIVE_PATH(mode, periodSlug);
+    let entry = normalizeArchiveEntry(await storage.getJSON(path));
+    if (!entry) entry = { period: cleanPeriod(period), sections: {}, savedAt: {}, mode };
+    if (!entry.sections) entry.sections = {};
+    if (!entry.savedAt)  entry.savedAt  = {};
+
+    entry.sections[sectionId] = sectionData;
+    entry.savedAt[sectionId]  = new Date().toISOString();
+    entry.lastSavedAt = entry.savedAt[sectionId];
+    entry.lastSavedBy = sanitize(user || 'anonymous');
+    entry.period = cleanPeriod(period);
+    entry.mode = mode;
+
+    await storage.setJSON(path, entry);
+    res.json({ ok: true, period: entry.period, sectionId, lastSavedAt: entry.lastSavedAt });
   } catch (err) {
-    res.status(500).json({ error: 'Storage error', detail: String(err) });
+    console.error('PUT archive err:', err);
+    res.status(500).json({ error: String(err) });
   }
 });
 
-// ── PUT report ──
-app.put('/api/reports/:mode', async (req, res) => {
+// POST: legacy full-snapshot save (still supported by older clients).
+app.post('/api/archive/:mode/:period', async (req, res) => {
   const { mode } = req.params;
-  if (!VALID.has(mode)) return res.status(400).json({ error: 'Invalid mode' });
+  const period = decodeURIComponent(req.params.period || '');
+  if (!VALID_MODE.has(mode)) return res.status(400).json({ error: 'Invalid mode' });
+  if (!period) return res.status(400).json({ error: 'Missing period' });
   const { data, user } = req.body;
   if (!data) return res.status(400).json({ error: 'Missing data' });
 
-  try {
-    const state = (await storage.get(mode)) || emptyState();
-    state.data = data;
-    state.version++;
-    const savedAt = new Date().toISOString();
-    state.history.push({
-      id: state.history.length + 1,
-      data: JSON.parse(JSON.stringify(data)),
-      version: state.version,
-      saved_by: clean(user || 'anonymous'),
-      saved_at: savedAt
-    });
-    if (state.history.length > 50) state.history = state.history.slice(-50);
-    await storage.set(mode, state);
-    res.json({ ok: true, version: state.version, savedAt });
-  } catch (err) {
-    res.status(500).json({ error: 'Storage error', detail: String(err) });
-  }
+  // Convert to the new section-based schema so reads are consistent.
+  const sections = (data && data.secs) ? { ...data.secs } : {};
+  const now = new Date().toISOString();
+  const savedAt = {};
+  for (const k of Object.keys(sections)) savedAt[k] = now;
+  const entry = {
+    period: cleanPeriod(data.week || period),
+    sections,
+    savedAt,
+    lastSavedAt: now,
+    lastSavedBy: sanitize(user || 'anonymous'),
+    mode
+  };
+  await storage.setJSON(ARCHIVE_PATH(mode, period), entry);
+  res.json({ ok: true, period: entry.period, lastSavedAt: now });
 });
 
-// ── GET history ──
-app.get('/api/reports/:mode/history', async (req, res) => {
+// List all archived entries for a mode (with section keys for UI filtering).
+app.get('/api/archive/:mode', async (req, res) => {
   const { mode } = req.params;
-  if (!VALID.has(mode)) return res.status(400).json({ error: 'Invalid mode' });
+  if (!VALID_MODE.has(mode)) return res.status(400).json({ error: 'Invalid mode' });
+  const list = await storage.listPrefix(ARCHIVE_PREFIX(mode));
+  const entries = list.map((e) => {
+    const n = normalizeArchiveEntry(e.data) || {};
+    return {
+      period: n.period || '',
+      sections: n.sections ? Object.keys(n.sections) : [],
+      lastSavedAt: n.lastSavedAt || e.uploadedAt,
+      lastSavedBy: n.lastSavedBy || ''
+    };
+  });
+  res.json({ entries });
+});
+
+// Get one archived entry (full data).
+app.get('/api/archive/:mode/:period', async (req, res) => {
+  const { mode } = req.params;
+  const period = decodeURIComponent(req.params.period || '');
+  if (!VALID_MODE.has(mode)) return res.status(400).json({ error: 'Invalid mode' });
+  const raw = await storage.getJSON(ARCHIVE_PATH(mode, period));
+  const entry = normalizeArchiveEntry(raw);
+  if (!entry) return res.status(404).json({ error: 'Not found' });
+  res.json(entry);
+});
+
+// Delete the entire archive entry for a period (all sections).
+app.delete('/api/archive/:mode/:period', async (req, res) => {
+  const { mode } = req.params;
+  const period = decodeURIComponent(req.params.period || '');
+  if (!VALID_MODE.has(mode)) return res.status(400).json({ error: 'Invalid mode' });
+  await storage.deleteByPathname(ARCHIVE_PATH(mode, period));
+  res.json({ ok: true, deleted: true });
+});
+
+// Delete ONE section from an archive entry (un-archive that section).
+app.delete('/api/archive/:mode/:period/:sectionId', async (req, res) => {
+  const { mode, sectionId } = req.params;
+  const period = decodeURIComponent(req.params.period || '');
+  if (!VALID_MODE.has(mode)) return res.status(400).json({ error: 'Invalid mode' });
   try {
-    const state = (await storage.get(mode)) || emptyState();
-    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
-    const items = state.history.slice(-limit).reverse().map((h) => ({
-      id: h.id, version: h.version, saved_at: h.saved_at, saved_by: h.saved_by
-    }));
-    res.json({ history: items });
+    const path = ARCHIVE_PATH(mode, period);
+    const entry = normalizeArchiveEntry(await storage.getJSON(path));
+    if (!entry || !entry.sections) return res.status(404).json({ error: 'Not found' });
+    delete entry.sections[sectionId];
+    if (entry.savedAt) delete entry.savedAt[sectionId];
+    if (Object.keys(entry.sections).length === 0) {
+      await storage.deleteByPathname(path);
+    } else {
+      entry.lastSavedAt = new Date().toISOString();
+      await storage.setJSON(path, entry);
+    }
+    res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: 'Storage error', detail: String(err) });
+    res.status(500).json({ error: String(err) });
   }
 });
 
-// ── POST sync/propagate ──
+// ── Legacy: sync/propagate (kept for compatibility, period-aware) ──
 app.post('/api/sync/propagate', async (req, res) => {
-  const { source } = req.body || {};
-  const results = [];
-  try {
-    if (!source || source === 'weekly') {
-      const weekly = (await storage.get('weekly')) || emptyState();
-      if (weekly.data) {
-        const monthly = (await storage.get('monthly')) || emptyState();
-        monthly.data = mergeData(monthly.data, weekly.data);
-        monthly.version++;
-        await storage.set('monthly', monthly);
-        results.push({ target: 'monthly', version: monthly.version });
-      }
-    }
-    if (!source || source === 'weekly' || source === 'monthly') {
-      const monthly = (await storage.get('monthly')) || emptyState();
-      if (monthly.data) {
-        const quarterly = (await storage.get('quarterly')) || emptyState();
-        quarterly.data = mergeData(quarterly.data, monthly.data);
-        quarterly.version++;
-        await storage.set('quarterly', quarterly);
-        results.push({ target: 'quarterly', version: quarterly.version });
-      }
-    }
-    res.json({ ok: true, propagated: results });
-  } catch (err) {
-    res.status(500).json({ error: 'Storage error', detail: String(err) });
-  }
+  res.json({ ok: true, note: 'Auto-propagation is disabled. Use per-section Generate button.' });
 });
 
-// ── POST import ──
+// ── Import (unchanged) ──
 app.post('/api/import', async (req, res) => {
   const { entries } = req.body || {};
-  if (!entries || !Array.isArray(entries)) return res.status(400).json({ error: 'Missing entries' });
-  try {
-    let imported = 0;
-    const states = {
-      weekly:    (await storage.get('weekly'))    || emptyState(),
-      monthly:   (await storage.get('monthly'))   || emptyState(),
-      quarterly: (await storage.get('quarterly')) || emptyState()
-    };
-    for (const e of entries) {
-      if (e.mode && e.data && VALID.has(e.mode)) {
-        const s = states[e.mode];
-        s.history.push({
-          id: s.history.length + 1,
-          data: e.data,
-          version: ++imported,
-          saved_by: 'import',
-          saved_at: new Date().toISOString()
-        });
-      }
+  if (!Array.isArray(entries)) return res.status(400).json({ error: 'Missing entries' });
+  let imported = 0;
+  for (const e of entries) {
+    if (e.mode && e.data && VALID_MODE.has(e.mode) && e.period) {
+      await storage.setJSON(ARCHIVE_PATH(e.mode, e.period), {
+        period: cleanPeriod(e.period),
+        data: e.data,
+        saved_by: 'import',
+        saved_at: new Date().toISOString(),
+        mode: e.mode
+      });
+      imported++;
     }
-    for (const mode of VALID) {
-      await storage.set(mode, states[mode]);
-    }
-    res.json({ ok: true, imported });
-  } catch (err) {
-    res.status(500).json({ error: 'Storage error', detail: String(err) });
   }
+  res.json({ ok: true, imported });
 });
-
-// ── Merge helper (unchanged) ──
-function mergeData(base, incoming) {
-  if (!incoming) return base;
-  if (!base) return JSON.parse(JSON.stringify(incoming));
-  const out = { week: base.week || incoming.week, secs: {} };
-  const allKeys = new Set([...Object.keys(base.secs || {}), ...Object.keys(incoming.secs || {})]);
-  for (const k of allKeys) {
-    const b = (base.secs || {})[k] || {};
-    const inc = (incoming.secs || {})[k] || {};
-    out.secs[k] = { ...b };
-    if (!out.secs[k].p && inc.p) out.secs[k].p = inc.p;
-    for (const arr of ['kp', 'ac', 'ch', 'nw', 'pr', 'tk']) {
-      const seen = new Set((b[arr] || []).map((x) => JSON.stringify(x)));
-      out.secs[k][arr] = [...(b[arr] || [])];
-      for (const item of inc[arr] || []) {
-        if (!seen.has(JSON.stringify(item))) out.secs[k][arr].push(item);
-      }
-    }
-  }
-  return out;
-}
 
 module.exports = app;
