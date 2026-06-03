@@ -209,6 +209,20 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
 .sec-regen-btn:active{transform:translateY(0)}
 .sec-regen-btn .ico{font-size:14px;line-height:1}
 .sec-regen-btn.busy{opacity:.6;pointer-events:none}
+.sec-save-btn{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:6px 12px;border-radius:8px;margin-left:8px;
+  background:linear-gradient(135deg,#0a3260 0%,#1d6b4f 100%);
+  color:#fff;border:none;cursor:pointer;
+  font-size:12px;font-weight:600;
+  transition:transform .15s,box-shadow .15s;
+  box-shadow:0 2px 6px rgba(10,50,96,.25);
+}
+.sec-save-btn:hover{transform:translateY(-1px);box-shadow:0 4px 10px rgba(10,50,96,.4)}
+.sec-save-btn:active{transform:translateY(0)}
+.sec-save-btn .ico{font-size:14px;line-height:1}
+.sec-save-btn.busy{opacity:.6;pointer-events:none}
+
 
 /* SECTION HEADER */
 .sec-hdr{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px}
@@ -805,6 +819,13 @@ async function openDash(mode) {
 
   // Inject period picker into header
   document.getElementById('bar-period').innerHTML = buildPeriodPicker();
+  setTimeout(() => {
+    const labelEl = document.getElementById(MODE_CFG.labelId);
+    if (labelEl && !labelEl.dataset.periodChangeBound) {
+      labelEl.dataset.periodChangeBound = '1';
+      labelEl.addEventListener('change', () => _checkPeriodArchive());
+    }
+  }, 100);
 
   // Update active mode button
   document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
@@ -815,13 +836,9 @@ async function openDash(mode) {
   restore(null); // clear form first
   const _savedData = await loadSaved();
   restore(_savedData);
+  setTimeout(() => _checkPeriodArchive(), 300);
 
-  // Auto-save on ANY input change in the dashboard
-  const _mainArea = document.getElementById('layout-area');
-  if (_mainArea) {
-    _mainArea.addEventListener('input', () => scheduleSave(), { passive: true });
-    new MutationObserver(() => scheduleSave()).observe(_mainArea, { childList: true, subtree: true });
-  }
+  // Auto-save DISABLED — user prefers manual Save buttons.
 }
 
 async function switchMode(newMode) {
@@ -1333,8 +1350,7 @@ let _isUpdatingProgress = false;
 let _progressTimer = null;
 function scheduleSave() {
   _isDirty = true;
-  clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(doSave, 1500);
+  // Auto-save disabled — only manual Save buttons trigger writes.
   // Debounce progress update separately to avoid MutationObserver infinite loop
   clearTimeout(_progressTimer);
   _progressTimer = setTimeout(() => {
@@ -1684,6 +1700,13 @@ openDash = async function(mode) {
 
   // Inject period label
   document.getElementById('bar-period').innerHTML = buildPeriodPicker();
+  setTimeout(() => {
+    const labelEl = document.getElementById(MODE_CFG.labelId);
+    if (labelEl && !labelEl.dataset.periodChangeBound) {
+      labelEl.dataset.periodChangeBound = '1';
+      labelEl.addEventListener('change', () => _checkPeriodArchive());
+    }
+  }, 100);
 
   // Update mode buttons
   document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
@@ -1733,6 +1756,7 @@ openDash = async function(mode) {
     if (firstSec2) firstSec2.classList.add('active');
     
     restore(_savedData);
+  setTimeout(() => _checkPeriodArchive(), 300);
   }
 
   // ── Show coverage alert for monthly only ──
@@ -2007,38 +2031,142 @@ function _getSourceEntriesForCurrentPeriod() {
 
 async function regenerateSectionFromSource(secId) {
   if (CURRENT_MODE !== 'monthly' && CURRENT_MODE !== 'quarterly') return;
-
   const btn = document.querySelector('.sec-regen-btn[data-sec="' + secId + '"]');
   if (btn) btn.classList.add('busy');
-
   try {
     const sources = _getSourceEntriesForCurrentPeriod();
     if (!sources.length) {
-      _showToast('⚠ لا توجد بيانات في المصدر للتجميع', '#F59E0B');
+      _showToast('⚠ No source data available to refresh', '#EF4444');
       return;
     }
-
     const aggregated = _smartAggregateSection(sources, secId);
-
-    // Get current draft, replace this section, restore.
-    const current = collect();
-    if (!current.secs) current.secs = {};
-    current.secs[secId] = aggregated;
-    restore(current);
-
-    const srcLabel = CURRENT_MODE === 'monthly' ? 'الأسابيع' : 'الأشهر';
-    _showToast('✦ تم تجميع القسم من ' + sources.length + ' ' + srcLabel + ' — راجعي ثم احفظي');
-    scheduleSave();
+    _refillSection(secId, aggregated);
+    const srcLabel = CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries';
+    _showToast('✦ ' + secId + ' refreshed from ' + sources.length + ' ' + srcLabel + ' — review then save');
   } catch (err) {
     console.error('regenerate error', err);
-    _showToast('⚠ خطأ في التجميع — راجعي console', '#EF4444');
+    _showToast('⚠ Refresh failed — see console', '#EF4444');
   } finally {
     if (btn) btn.classList.remove('busy');
   }
 }
 
+// Rebuild ONLY this section's DOM with the new data (avoids the row-append bug in restore()).
+function _refillSection(secId, secData) {
+  const oldEl = document.getElementById('sec-' + secId);
+  if (!oldEl) return;
+  const allSecs = (typeof getAllSections === 'function' ? getAllSections() : DEFAULT_SECTIONS) || [];
+  const secMeta = allSecs.find(s => s.id === secId) || { id: secId, name: secId, badge: '??', color: '#0a3260' };
+  let newHTML;
+  if (secId === 'it')       newHTML = buildITSectionHTML(secMeta);
+  else if (secId === 'fac') newHTML = buildFacilitySectionHTML(secMeta);
+  else                      newHTML = buildStandardSectionHTML(secMeta);
+  const wrap = document.createElement('div');
+  wrap.innerHTML = newHTML.trim();
+  const newEl = wrap.firstElementChild;
+  const wasActive = oldEl.classList.contains('active');
+  oldEl.replaceWith(newEl);
+  if (wasActive) newEl.classList.add('active');
+  if (secData) {
+    const partial = { secs: {} };
+    partial.secs[secId] = secData;
+    restore(partial);
+  }
+}
+
+// Save one section to the archive for the current period.
+async function saveSectionToArchive(secId) {
+  if (!CURRENT_MODE || !MODE_CFG) return;
+  const btn = document.querySelector('.sec-save-btn[data-sec="' + secId + '"]');
+  if (btn) btn.classList.add('busy');
+  try {
+    const data = collect();
+    const period = data.week;
+    if (!period) {
+      _showToast('⚠ Please select a period first', '#EF4444');
+      return;
+    }
+    const secData = (data.secs || {})[secId];
+    if (!secData) {
+      _showToast('⚠ Section has no data to save', '#EF4444');
+      return;
+    }
+    const slug = _slugify(period);
+    const res = await fetch(API_BASE + '/archive/' + CURRENT_MODE + '/' + encodeURIComponent(slug), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ period: period, sectionId: secId, sectionData: secData, user: _userName || 'anonymous' })
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error('HTTP ' + res.status + ' — ' + txt);
+    }
+    _showToast('✦ ' + secId + ' archived for ' + period);
+    const secEl = document.getElementById('sec-' + secId);
+    if (secEl) secEl.remove();
+    const sideItem = document.querySelector('.side-item[data-sec="' + secId + '"]');
+    if (sideItem) sideItem.remove();
+  } catch (err) {
+    console.error('saveSectionToArchive error', err);
+    _showToast('⚠ Could not archive section — see console', '#EF4444');
+  } finally {
+    if (btn) btn.classList.remove('busy');
+  }
+}
+
+function _slugify(s) {
+  return String(s || '').toLowerCase()
+    .replace(/[·]/g, ' ')
+    .replace(/[^a-z0-9\s-]+/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-');
+}
+
+async function _checkPeriodArchive() {
+  if (!CURRENT_MODE || !MODE_CFG) return;
+  const labelEl = document.getElementById(MODE_CFG.labelId);
+  if (!labelEl || !labelEl.value) return;
+  const slug = _slugify(labelEl.value);
+  const oldBanner = document.getElementById('period-archive-banner');
+  if (oldBanner) oldBanner.remove();
+  try {
+    const res = await fetch(API_BASE + '/archive/' + CURRENT_MODE + '/' + encodeURIComponent(slug));
+    if (!res.ok) return;
+    const entry = await res.json();
+    const sections = (entry && entry.sections) ? Object.keys(entry.sections) : [];
+    if (!sections.length) return;
+    const main = document.querySelector('.main');
+    if (!main) return;
+    const banner = document.createElement('div');
+    banner.id = 'period-archive-banner';
+    banner.style.cssText = 'background:#FEF3C7;border:1px solid #F59E0B;color:#92400E;padding:12px 16px;border-radius:8px;margin-bottom:16px;font-size:14px;line-height:1.5;';
+    const tags = sections.map(s => '<code style="background:#FDE68A;padding:1px 6px;border-radius:3px;">'+s+'</code>').join(' ');
+    const idList = sections.map(s => "'"+s+"'").join(',');
+    banner.innerHTML = '⚠ <strong>' + labelEl.value + '</strong> already has ' + sections.length +
+      ' section(s) archived: ' + tags +
+      '. <button onclick="_hideArchivedSections([' + idList + '])" style="margin-left:8px;background:#92400E;color:#fff;border:none;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:12px;">Hide already-archived</button>';
+    main.insertBefore(banner, main.firstChild);
+  } catch (e) { /* ignore */ }
+}
+
+function _hideArchivedSections(secIds) {
+  for (const sid of secIds) {
+    const el = document.getElementById('sec-' + sid);
+    if (el) el.remove();
+    const side = document.querySelector('.side-item[data-sec="' + sid + '"]');
+    if (side) side.remove();
+  }
+  const banner = document.getElementById('period-archive-banner');
+  if (banner) banner.remove();
+  _showToast('✦ Already-archived sections hidden');
+}
+
 // Expose for inline onclick handlers
 window.regenerateSectionFromSource = regenerateSectionFromSource;
+window.saveSectionToArchive = saveSectionToArchive;
+window._hideArchivedSections = _hideArchivedSections;
+window._checkPeriodArchive = _checkPeriodArchive;
 
 // Auto-fill Monthly from all Weekly entries of same month
 function _autoFillMonthlyFromWeekly() {
@@ -3255,7 +3383,7 @@ function buildStandardSectionHTML(sec) {
   let html = '<div class="section" id="sec-' + sec.id + '">'
     + '<div class="sec-hdr"><div class="sec-left"><div class="sec-badge" style="background:' + sec.color + '">' + sec.badge + '</div>'
     + '<div><div class="sec-name">' + sec.name + '</div>'
-    + '<div class="prow">Presenter:<input class="p-inp" data-s="' + sec.id + '" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + sec.id + '" onclick="regenerateSectionFromSource(\'' + sec.id + '\')" title="تجميع البيانات من ' + (CURRENT_MODE === 'monthly' ? 'الأسابيع' : 'الأشهر') + ' (Smart dedup)"><span class="ico">⟳</span> تجميع</button>' : '') + '</div>'
+    + '<div class="prow">Presenter:<input class="p-inp" data-s="' + sec.id + '" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + sec.id + '" onclick="regenerateSectionFromSource(\'' + sec.id + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><span class="ico">⟳</span> Refresh</button><button class="sec-save-btn" data-sec="' + sec.id + '" onclick="saveSectionToArchive(\'' + sec.id + '\')" title="Save section to archive"><span class="ico">✦</span> Save</button>' : '') + '</div>'
     + '<div class="sec-progress" data-s="' + sec.id + '" style="display:none"><span class="sec-progress-label">0 of 0 tasks completed</span><div class="sec-progress-bar"><div class="sec-progress-fill" style="width:0"></div></div><span class="sec-progress-pct">0%</span></div>'
     // Key Points — NO dismiss button
     + '<div class="card"><div class="card-hdr"><span class="card-ttl">Key Points</span><button class="btn btn-ghost btn-sm" onclick="aR(\'' + sec.id + '-kp\')">+ Row</button></div>'
@@ -3428,7 +3556,7 @@ function buildITSectionHTML(sec) {
   return '<div class="section" id="sec-it">'
     + '<div class="sec-hdr"><div class="sec-left"><div class="sec-badge" style="background:var(--teal-dk)">' + sec.badge + '</div>'
     + '<div><div class="sec-name">Information Technology</div>'
-    + '<div class="prow">Presenter:<input class="p-inp" data-s="it" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + 'it' + '" onclick="regenerateSectionFromSource(\'' + 'it' + '\')" title="تجميع البيانات من ' + (CURRENT_MODE === 'monthly' ? 'الأسابيع' : 'الأشهر') + ' (Smart dedup)"><span class="ico">⟳</span> تجميع</button>' : '') + '</div>'
+    + '<div class="prow">Presenter:<input class="p-inp" data-s="it" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + 'it' + '" onclick="regenerateSectionFromSource(\'' + 'it' + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><span class="ico">⟳</span> Refresh</button><button class="sec-save-btn" data-sec="' + 'it' + '" onclick="saveSectionToArchive(\'' + 'it' + '\')" title="Save section to archive"><span class="ico">✦</span> Save</button>' : '') + '</div>'
     + '<div class="card" id="card-it-stats"><div class="card-hdr"><span class="card-ttl">Support Tickets — ' + pl + ' Data</span>'
     + '<button class="card-dismiss" onclick="dismissCard(\'card-it-stats\')" title="Remove">✕</button></div><div class="card-body"><div class="srow">'
     + '<div class="st s0"><div class="stnum"><input id="it-t" placeholder="0"/></div><div class="stlbl">Total Tickets</div></div>'
@@ -3461,7 +3589,7 @@ function buildFacilitySectionHTML(sec) {
   return '<div class="section" id="sec-fac">'
     + '<div class="sec-hdr"><div class="sec-left"><div class="sec-badge" style="background:#1B2631">' + sec.badge + '</div>'
     + '<div><div class="sec-name">Facility</div>'
-    + '<div class="prow">Presenter:<input class="p-inp" data-s="fac" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + 'fac' + '" onclick="regenerateSectionFromSource(\'' + 'fac' + '\')" title="تجميع البيانات من ' + (CURRENT_MODE === 'monthly' ? 'الأسابيع' : 'الأشهر') + ' (Smart dedup)"><span class="ico">⟳</span> تجميع</button>' : '') + '</div>'
+    + '<div class="prow">Presenter:<input class="p-inp" data-s="fac" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + 'fac' + '" onclick="regenerateSectionFromSource(\'' + 'fac' + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><span class="ico">⟳</span> Refresh</button><button class="sec-save-btn" data-sec="' + 'fac' + '" onclick="saveSectionToArchive(\'' + 'fac' + '\')" title="Save section to archive"><span class="ico">✦</span> Save</button>' : '') + '</div>'
     + '<div class="card" id="card-fac-tk"><div class="card-hdr"><span class="card-ttl">Facility Tickets</span><button class="btn btn-ghost btn-sm" onclick="aR(\'fac-tk\',0,3)">+ Row</button>'
     + '<button class="card-dismiss" onclick="dismissCard(\'card-fac-tk\')" title="Remove">✕</button></div>'
     + '<div class="card-body"><table class="tbl" id="fac-tk"><thead><tr><th style="width:20%">Category</th><th>Description</th><th style="width:13%" class="th-g">Status</th><th style="width:26px"></th></tr></thead><tbody></tbody></table>'
