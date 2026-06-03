@@ -223,6 +223,32 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
 .sec-save-btn .ico{font-size:14px;line-height:1}
 .sec-save-btn.busy{opacity:.6;pointer-events:none}
 
+/* Global Save button removed entirely — no longer needed. */
+
+/* Clear button style — neutral red */
+.sec-clear-btn{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:6px 12px;border-radius:8px;margin-left:8px;
+  background:transparent;
+  color:#B91C1C;border:1px solid #FCA5A5;cursor:pointer;
+  font-size:12px;font-weight:600;
+  transition:background .15s,color .15s,border-color .15s;
+}
+.sec-clear-btn:hover{background:#FEE2E2;border-color:#B91C1C}
+.sec-clear-btn .ico{font-size:14px;line-height:1}
+
+/* Ensure the SVG icons inherit font color and align nicely */
+.sec-regen-btn svg, .sec-save-btn svg, .sec-clear-btn svg {
+  flex-shrink: 0;
+}
+
+/* Fix font for any remaining unicode icons */
+.sec-regen-btn .ico, .sec-save-btn .ico, .sec-clear-btn .ico {
+  font-family: -apple-system, "Segoe UI Symbol", "Apple Color Emoji", sans-serif !important;
+  font-weight: normal;
+}
+
+
 
 /* SECTION HEADER */
 .sec-hdr{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px}
@@ -722,7 +748,7 @@ body.dash-active #dash-root {display:flex;flex-direction:column;min-height:100vh
       </div>
       <button class="btn btn-ghost" onclick="openPresentation()" title="Present current report">▶ Present</button>
       <button class="btn btn-ghost" onclick="showOv()">⬇ Export PPT</button>
-      <button class="btn btn-teal" onclick="doSave()">✦ Save</button>
+      
     </div>
   </header>
   <div id="layout-area"></div>
@@ -795,7 +821,7 @@ let MODE_CFG = null;
 
 // ── HUB NAVIGATION ──────────────────────────────
 async function goHub() {
-  if (CURRENT_MODE) await doSave();
+  /* auto-save removed */
   CURRENT_MODE = null;
   MODE_CFG = null;
   document.body.className = 'hub-active';
@@ -813,7 +839,7 @@ async function openDash(mode) {
     '<div class="layout"><aside class="side">' + MODE_CFG.side +
     '<div class="side-bottom-actions">' +
     '<button class="side-action-btn hub-btn" onclick="goHub()"><span>⬅</span> Hub</button>' +
-    '<button class="side-action-btn archive-btn" onclick="openHistory()"><span>📋</span> Archive</button>' +
+    
     '</div>' +
     '</aside><main class="main">' + MODE_CFG.main + '</main></div>';
 
@@ -832,10 +858,14 @@ async function openDash(mode) {
   const btn = document.querySelector('.' + MODE_CFG.modeBtnClass);
   if (btn) btn.classList.add('active');
 
-  // Restore saved data
+  // Restore saved data — ONLY for weekly mode.
+  // Monthly/quarterly start with an empty form; users populate via per-section
+  // Generate and persist via per-section Save to archive (no draft slot needed).
   restore(null); // clear form first
-  const _savedData = await loadSaved();
-  restore(_savedData);
+  if (CURRENT_MODE === 'weekly') {
+    const _savedData = await loadSaved();
+    if (_savedData) restore(_savedData);
+  }
   setTimeout(() => _checkPeriodArchive(), 300);
 
   // Auto-save DISABLED — user prefers manual Save buttons.
@@ -843,7 +873,7 @@ async function openDash(mode) {
 
 async function switchMode(newMode) {
   if (newMode === CURRENT_MODE) return;
-  await doSave();
+  // Auto-save on mode switch removed — user explicitly saves per section.
   await openDash(newMode);
 }
 
@@ -1404,8 +1434,7 @@ if (!_isFileProtocol) {
   }, 30000);
 }
 
-// Safety net auto-save
-setInterval(() => { if (_isDirty) doSave(); }, 20000);
+// Safety-net auto-save REMOVED — only manual Save buttons trigger writes.
 
 // ── MODAL ──
 function showOv(){document.getElementById('ov').classList.add('on')}
@@ -1690,7 +1719,7 @@ openDash = async function(mode) {
     '<div class="layout"><aside class="side">' + sideHTML +
     '<div class="side-bottom-actions">' +
     '<button class="side-action-btn hub-btn" onclick="goHub()"><span>⬅</span> Hub</button>' +
-    '<button class="side-action-btn archive-btn" onclick="openHistory()"><span>📋</span> Archive</button>' +
+    
     '</div>' +
     '</aside><main class="main">' + mainHTML + '</main></div>';
   
@@ -1749,7 +1778,7 @@ openDash = async function(mode) {
       '<div class="layout"><aside class="side">' + sideHTML2 +
       '<div class="side-bottom-actions">' +
       '<button class="side-action-btn hub-btn" onclick="goHub()"><span>⬅</span> Hub</button>' +
-      '<button class="side-action-btn archive-btn" onclick="openHistory()"><span>📋</span> Archive</button>' +
+      
       '</div>' +
       '</aside><main class="main">' + mainHTML2 + '</main></div>';
     const firstSec2 = document.querySelector('.section');
@@ -1783,7 +1812,7 @@ openDash = async function(mode) {
         '<div class="layout"><aside class="side">' + sideHTML3 +
         '<div class="side-bottom-actions">' +
         '<button class="side-action-btn hub-btn" onclick="goHub()"><span>⬅</span> Hub</button>' +
-        '<button class="side-action-btn archive-btn" onclick="openHistory()"><span>📋</span> Archive</button>' +
+        
         '</div>' +
         '</aside><main class="main">' + mainHTML3 + '</main></div>';
       const firstSec3 = document.querySelector('.section');
@@ -1806,12 +1835,7 @@ openDash = async function(mode) {
     setTimeout(() => { _isUpdatingProgress = false; }, 200);
   }, 600);
 
-  // Auto-save listeners
-  const _mainArea = document.getElementById('layout-area');
-  if (_mainArea) {
-    _mainArea.addEventListener('input', () => scheduleSave(), { passive: true });
-    new MutationObserver(() => scheduleSave()).observe(_mainArea, { childList: true, subtree: true });
-  }
+  // Auto-save listeners REMOVED — user saves explicitly per section.
   } catch(err) {
     console.error('openDash ERROR:', err);
     // Show visible error on page
@@ -1865,7 +1889,25 @@ function _stripLeadingNumber(s) {
   return String(s == null ? '' : s).replace(/^\s*\d+\.\s*/, '').trim();
 }
 function _normalizeText(s) {
-  return _stripLeadingNumber(s).toLowerCase().replace(/\s+/g, ' ');
+  return _stripLeadingNumber(s).toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+// Recognize placeholder-like text that shouldn't be aggregated as a real item.
+// Catches things like "Planning to...", "TBD", "TODO", "WIP", trailing "...",
+// or very short fragments (≤4 chars after stripping).
+function _isPlaceholderText(s) {
+  const t = _stripLeadingNumber(s || '').trim();
+  if (!t) return true;
+  if (t.length <= 4) return true;
+  // Ends with ellipsis (real or three dots)
+  if (/(?:\.{3,}|…)\s*$/.test(t)) return true;
+  const low = t.toLowerCase();
+  // Common placeholder words
+  const placeholders = ['tbd', 'tba', 'todo', 'wip', 'n/a', 'na', 'pending', 'planning to', 'to be', 'placeholder', '-', '...', '—'];
+  for (const p of placeholders) {
+    if (low === p || low.startsWith(p + ' ') || low.endsWith(' ' + p)) return true;
+  }
+  return false;
 }
 function _renumberList(arr) {
   return arr.map((item, i) => (i + 1) + '. ' + _stripLeadingNumber(item));
@@ -1904,6 +1946,7 @@ function _smartAggregateSection(sources, secId) {
       const status = (Array.isArray(kp) ? kp[1] : '') || '';
       const key = _normalizeText(task);
       if (!key) continue;
+      if (_isPlaceholderText(task)) continue;
       // Overwrite: latest occurrence wins for status & task formatting
       kpMap.set(key, { task: _stripLeadingNumber(task), status: _stripLeadingNumber(status) });
     }
@@ -1913,6 +1956,7 @@ function _smartAggregateSection(sources, secId) {
       const text = String(ac || '');
       const key = _normalizeText(text);
       if (!key) continue;
+      if (_isPlaceholderText(text)) continue;
       if (!acMap.has(key)) acMap.set(key, _stripLeadingNumber(text));
     }
 
@@ -1922,6 +1966,7 @@ function _smartAggregateSection(sources, secId) {
       const action = (Array.isArray(ch) ? ch[1] : '') || '';
       const key = _normalizeText(challenge);
       if (!key) continue;
+      if (_isPlaceholderText(challenge)) continue;
       if (!chMap.has(key)) {
         chMap.set(key, { challenge: _stripLeadingNumber(challenge), action: _stripLeadingNumber(action) });
       } else if (action) {
@@ -1935,6 +1980,7 @@ function _smartAggregateSection(sources, secId) {
       const text = String(nw || '');
       const key = _normalizeText(text);
       if (!key) continue;
+      if (_isPlaceholderText(text)) continue;
       if (!nwMap.has(key)) nwMap.set(key, _stripLeadingNumber(text));
     }
 
@@ -1943,6 +1989,7 @@ function _smartAggregateSection(sources, secId) {
       const text = String(tk || '');
       const key = _normalizeText(text);
       if (!key) continue;
+      if (_isPlaceholderText(text)) continue;
       if (!tkMap.has(key)) tkMap.set(key, _stripLeadingNumber(text));
     }
 
@@ -2057,22 +2104,79 @@ function _refillSection(secId, secData) {
   if (!oldEl) return;
   const allSecs = (typeof getAllSections === 'function' ? getAllSections() : DEFAULT_SECTIONS) || [];
   const secMeta = allSecs.find(s => s.id === secId) || { id: secId, name: secId, badge: '??', color: '#0a3260' };
+
   let newHTML;
   if (secId === 'it')       newHTML = buildITSectionHTML(secMeta);
   else if (secId === 'fac') newHTML = buildFacilitySectionHTML(secMeta);
   else                      newHTML = buildStandardSectionHTML(secMeta);
+
   const wrap = document.createElement('div');
   wrap.innerHTML = newHTML.trim();
   const newEl = wrap.firstElementChild;
   const wasActive = oldEl.classList.contains('active');
   oldEl.replaceWith(newEl);
   if (wasActive) newEl.classList.add('active');
+
+  // ULTRA-DEFENSIVE: explicitly empty every tbody/list inside the new section,
+  // in case the builder produced any leftover rows we didn't expect.
+  _clearSectionDataInDOM(secId);
+
   if (secData) {
     const partial = { secs: {} };
     partial.secs[secId] = secData;
     restore(partial);
   }
 }
+
+// Wipe all data-containing elements inside a section (used by Generate and Clear).
+function _clearSectionDataInDOM(secId) {
+  // Tables: ${secId}-kp, ${secId}-ch, ${secId}-tk
+  for (const suf of ['kp', 'ch', 'tk']) {
+    const t = document.getElementById(secId + '-' + suf);
+    if (t) {
+      const tb = t.querySelector('tbody');
+      if (tb) tb.innerHTML = '';
+    }
+  }
+  // Accomplishments + next-period lists: ${secId}-ac, ${secId}-nw
+  for (const suf of ['ac', 'nw']) {
+    const el = document.getElementById(secId + '-' + suf);
+    if (el) el.innerHTML = '';
+  }
+  // Facility purchase grid
+  if (secId === 'fac') {
+    const pg = document.getElementById('fac-pg');
+    if (pg) pg.innerHTML = '';
+    const tot = document.getElementById('fac-tot');
+    if (tot) tot.value = '';
+  }
+  // IT scalar fields
+  if (secId === 'it') {
+    for (const f of ['t', 'c1n', 'c1l', 'c2n', 'c2l', 'c3n', 'c3l']) {
+      const el = document.getElementById('it-' + f);
+      if (el) el.value = '';
+    }
+  }
+  // Presenter
+  const pi = document.querySelector('.p-inp[data-s="' + secId + '"]');
+  if (pi) pi.value = '';
+}
+
+// User-facing "Clear" action — wipes the section AND removes it from the saved draft.
+async function clearSection(secId) {
+  if (!confirm('Clear all data in this section? This will also remove it from the current draft.')) return;
+  _clearSectionDataInDOM(secId);
+
+  // Also clear it from the saved draft on the server, so re-opening doesn't repopulate.
+  try {
+    const data = collect();
+    if (data && data.secs) data.secs[secId] = { p: '', kp: [], ac: [], ch: [], nw: [] };
+    await API.save(MODE_CFG.storageKey, data);
+  } catch (e) { console.error('clearSection save error:', e); }
+
+  _showToast('✦ ' + secId + ' cleared');
+}
+window.clearSection = clearSection;
 
 // Save one section to the archive for the current period.
 async function saveSectionToArchive(secId) {
@@ -2702,8 +2806,7 @@ async function dropSec(e) {
   e.currentTarget.classList.remove('drag-over');
   if (!_draggedSecId || _draggedSecId === targetId) return;
 
-  // Save current data first
-  await doSave();
+  // Auto-save removed; user saves per-section explicitly.
 
   // Get current order
   const currentOrder = getSectionOrder();
@@ -3281,7 +3384,7 @@ async function addCustomSection() {
   if (!name || !name.trim()) return;
   
   // Save current data first
-  if (CURRENT_MODE) await doSave();
+  /* auto-save removed */
   
   const id = getNextSectionId();
   const allSecs = [...DEFAULT_SECTIONS, ..._customSections];
@@ -3383,7 +3486,7 @@ function buildStandardSectionHTML(sec) {
   let html = '<div class="section" id="sec-' + sec.id + '">'
     + '<div class="sec-hdr"><div class="sec-left"><div class="sec-badge" style="background:' + sec.color + '">' + sec.badge + '</div>'
     + '<div><div class="sec-name">' + sec.name + '</div>'
-    + '<div class="prow">Presenter:<input class="p-inp" data-s="' + sec.id + '" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + sec.id + '" onclick="regenerateSectionFromSource(\'' + sec.id + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><span class="ico">⟳</span> Refresh</button><button class="sec-save-btn" data-sec="' + sec.id + '" onclick="saveSectionToArchive(\'' + sec.id + '\')" title="Save section to archive"><span class="ico">✦</span> Save</button>' : '') + '</div>'
+    + '<div class="prow">Presenter:<input class="p-inp" data-s="' + sec.id + '" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + sec.id + '" onclick="regenerateSectionFromSource(\'' + sec.id + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg> Generate</button><button class="sec-clear-btn" data-sec="' + sec.id + '" onclick="clearSection(\'' + sec.id + '\')" title="Clear section data"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"vertical-align:-2px\"><polyline points=\"3 6 5 6 21 6\"/><path d=\"M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6\"/></svg> Clear</button><button class="sec-save-btn" data-sec="' + sec.id + '" onclick="saveSectionToArchive(\'' + sec.id + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : '') + '</div>'
     + '<div class="sec-progress" data-s="' + sec.id + '" style="display:none"><span class="sec-progress-label">0 of 0 tasks completed</span><div class="sec-progress-bar"><div class="sec-progress-fill" style="width:0"></div></div><span class="sec-progress-pct">0%</span></div>'
     // Key Points — NO dismiss button
     + '<div class="card"><div class="card-hdr"><span class="card-ttl">Key Points</span><button class="btn btn-ghost btn-sm" onclick="aR(\'' + sec.id + '-kp\')">+ Row</button></div>'
@@ -3556,7 +3659,7 @@ function buildITSectionHTML(sec) {
   return '<div class="section" id="sec-it">'
     + '<div class="sec-hdr"><div class="sec-left"><div class="sec-badge" style="background:var(--teal-dk)">' + sec.badge + '</div>'
     + '<div><div class="sec-name">Information Technology</div>'
-    + '<div class="prow">Presenter:<input class="p-inp" data-s="it" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + 'it' + '" onclick="regenerateSectionFromSource(\'' + 'it' + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><span class="ico">⟳</span> Refresh</button><button class="sec-save-btn" data-sec="' + 'it' + '" onclick="saveSectionToArchive(\'' + 'it' + '\')" title="Save section to archive"><span class="ico">✦</span> Save</button>' : '') + '</div>'
+    + '<div class="prow">Presenter:<input class="p-inp" data-s="it" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + 'it' + '" onclick="regenerateSectionFromSource(\'' + 'it' + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg> Generate</button><button class="sec-clear-btn" data-sec="' + 'it' + '" onclick="clearSection(\'' + 'it' + '\')" title="Clear section data"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"vertical-align:-2px\"><polyline points=\"3 6 5 6 21 6\"/><path d=\"M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6\"/></svg> Clear</button><button class="sec-save-btn" data-sec="' + 'it' + '" onclick="saveSectionToArchive(\'' + 'it' + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : '') + '</div>'
     + '<div class="card" id="card-it-stats"><div class="card-hdr"><span class="card-ttl">Support Tickets — ' + pl + ' Data</span>'
     + '<button class="card-dismiss" onclick="dismissCard(\'card-it-stats\')" title="Remove">✕</button></div><div class="card-body"><div class="srow">'
     + '<div class="st s0"><div class="stnum"><input id="it-t" placeholder="0"/></div><div class="stlbl">Total Tickets</div></div>'
@@ -3589,7 +3692,7 @@ function buildFacilitySectionHTML(sec) {
   return '<div class="section" id="sec-fac">'
     + '<div class="sec-hdr"><div class="sec-left"><div class="sec-badge" style="background:#1B2631">' + sec.badge + '</div>'
     + '<div><div class="sec-name">Facility</div>'
-    + '<div class="prow">Presenter:<input class="p-inp" data-s="fac" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + 'fac' + '" onclick="regenerateSectionFromSource(\'' + 'fac' + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><span class="ico">⟳</span> Refresh</button><button class="sec-save-btn" data-sec="' + 'fac' + '" onclick="saveSectionToArchive(\'' + 'fac' + '\')" title="Save section to archive"><span class="ico">✦</span> Save</button>' : '') + '</div>'
+    + '<div class="prow">Presenter:<input class="p-inp" data-s="fac" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + 'fac' + '" onclick="regenerateSectionFromSource(\'' + 'fac' + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg> Generate</button><button class="sec-clear-btn" data-sec="' + 'fac' + '" onclick="clearSection(\'' + 'fac' + '\')" title="Clear section data"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"vertical-align:-2px\"><polyline points=\"3 6 5 6 21 6\"/><path d=\"M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6\"/></svg> Clear</button><button class="sec-save-btn" data-sec="' + 'fac' + '" onclick="saveSectionToArchive(\'' + 'fac' + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : '') + '</div>'
     + '<div class="card" id="card-fac-tk"><div class="card-hdr"><span class="card-ttl">Facility Tickets</span><button class="btn btn-ghost btn-sm" onclick="aR(\'fac-tk\',0,3)">+ Row</button>'
     + '<button class="card-dismiss" onclick="dismissCard(\'card-fac-tk\')" title="Remove">✕</button></div>'
     + '<div class="card-body"><table class="tbl" id="fac-tk"><thead><tr><th style="width:20%">Category</th><th>Description</th><th style="width:13%" class="th-g">Status</th><th style="width:26px"></th></tr></thead><tbody></tbody></table>'
