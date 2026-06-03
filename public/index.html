@@ -1996,12 +1996,16 @@ async function searchArchive() {
       const res = await fetch(`${API_BASE}/reports/${type}/history?limit=100`);
       if (res.ok) {
         const json = await res.json();
-        historyItems = (json.history || []).map(h => {
+        // FIX: APPEND server entries to historyItems (don't overwrite),
+        // and skip server entries with no usable data (the /history endpoint
+        // only returns metadata, so most entries here have empty _parsed).
+        const serverItems = (json.history || []).map(h => {
           try {
             const parsed = JSON.parse(h.data || '{}');
             return { ...h, _parsed: parsed };
           } catch(e) { return { ...h, _parsed: {} }; }
-        });
+        }).filter(h => h._parsed && h._parsed.week);
+        historyItems = [...historyItems, ...serverItems];
       }
     } catch(e) { /* fallback below */ }
   }
