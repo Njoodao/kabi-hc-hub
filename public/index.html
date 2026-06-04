@@ -405,7 +405,7 @@ tr:hover .db{opacity:1}.db:hover{color:#c00;background:#fee}
 .pa{font-size:24px;font-weight:800;color:var(--teal);line-height:1}
 .pc:nth-child(2) .pa{color:var(--green)}.pc:nth-child(3) .pa{color:var(--blue)}
 .pv input,.pa input{background:none;border:none;outline:none;font-family:inherit;font-size:inherit;color:inherit;font-weight:inherit;text-align:center;width:100%;}
-.pt{display:flex;align-items:center;justify-content:flex-end;padding:9px 16px;border-top:1px solid var(--border);font-size:12px;font-weight:700;color:var(--txt);gap:8px;}
+.pt{display:flex;align-items:center;justify-content:center;padding:9px 16px;border-top:1px solid var(--border);font-size:12px;font-weight:700;color:var(--txt);gap:8px;}
 .ptv{background:var(--teal);color:var(--navy);padding:4px 13px;border-radius:20px;font-size:12px;font-weight:800;}
 .ptv input{background:none;border:none;outline:none;font-family:inherit;font-size:inherit;color:inherit;font-weight:inherit;width:80px;text-align:center;}
 
@@ -421,7 +421,7 @@ tr:hover .db{opacity:1}.db:hover{color:#c00;background:#fee}
 .modal{background:#fff;border-radius:var(--r);padding:26px 30px;max-width:400px;width:90%;box-shadow:var(--sh-md);}
 .modal h2{font-size:16px;font-weight:800;color:var(--navy);margin-bottom:7px}
 .modal p{font-size:12px;color:var(--txt-mid);line-height:1.6;margin-bottom:18px}
-.mbtns{display:flex;gap:8px;justify-content:flex-end}
+.mbtns{display:flex;gap:8px;justify-content:center}
 .btn-navy{background:var(--navy);color:#fff}.btn-navy:hover{background:var(--navy-mid)}
 .btn-outline{background:none;border:1px solid var(--border);color:var(--txt-mid)}.btn-outline:hover{background:var(--bg)}
 
@@ -715,6 +715,52 @@ body.dash-active #dash-root {display:flex;flex-direction:column;min-height:100vh
 .hub-ar-btn.delete:hover{
   background:#FEE2E2;color:#B91C1C;border-color:#FCA5A5;
 }
+
+.sec-rename-btn, .sec-del-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 7px 10px; font-size: 11.5px; letter-spacing: .02em;
+  background: #FFFFFF; color: #6B7280;
+  border: 1px solid #E5E7EB; border-radius: 6px;
+  cursor: pointer; transition: background .15s, color .15s, border-color .15s;
+}
+.sec-rename-btn:hover { background: #EFF6FF; color: #1E40AF; border-color: #BFDBFE; }
+.sec-del-btn:hover    { background: #FEE2E2; color: #B91C1C; border-color: #FCA5A5; }
+
+.hub-archive-hdr { display: flex; align-items: center; gap: 10px; }
+.hub-archive-actions { margin-left: auto; display: inline-flex; gap: 8px; }
+.hub-bkp-btn {
+  padding: 7px 12px;
+  background: #F0FDFA;
+  color: #0F766E;
+  border: 1px solid #99F6E4;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.hub-bkp-btn:hover { background: #CCFBF1; border-color: #5EEAD4; color: #134E4A; }
+
+.hub-af-btn-backup {
+  background: rgba(98,198,211,.08) !important;
+  border: 1px solid rgba(98,198,211,.25) !important;
+  color: #62C6D3 !important;
+}
+.hub-af-btn-backup:hover {
+  background: rgba(98,198,211,.18) !important;
+  border-color: rgba(98,198,211,.45) !important;
+}
+.arc-safety-note {
+  margin-bottom: 8px;
+  padding: 10px 14px;
+  background: rgba(34,197,94,.08);
+  border: 1px solid rgba(34,197,94,.25);
+  border-radius: 10px;
+  font-size: 11.5px;
+  color: #86EFAC;
+  line-height: 1.6;
+}
+.arc-safety-note strong { color: #A7F3D0; }
 </style>
 </head>
 <body class="hub-active">
@@ -796,6 +842,12 @@ body.dash-active #dash-root {display:flex;flex-direction:column;min-height:100vh
       <div class="hub-archive-results" id="arc-results">
         <div class="hub-ar-empty">Select filters and click Search to find saved reports</div>
       </div>
+      <div class="hub-archive-footer" style="margin-top:14px;display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap;">
+        <button class="hub-af-btn hub-af-btn-backup" onclick="exportArchive()" title="Download a JSON backup of all archive data">⬇ Backup</button>
+        <button class="hub-af-btn hub-af-btn-backup" onclick="document.getElementById('arc-import-input').click()" title="Restore archive data from a backup JSON file">⬆ Restore</button>
+        <input type="file" id="arc-import-input" accept="application/json,.json" style="display:none" onchange="importArchive(event)">
+      </div>
+      <div class="arc-safety-note" style="margin-top:10px;margin-bottom:0;">🔒 <strong>Your data is safe across updates.</strong> Saved entries live in Vercel Blob storage (the cloud database), separate from the app code. When the app updates, your archive is preserved. Use <strong>⬇ Backup</strong> regularly for extra safety.</div>
     </div>
 
   </div>
@@ -887,6 +939,181 @@ function _embHiddenAdd(idx) {
     }
   } catch (e) { console.error('[emb hide] failed:', e); }
 }
+
+// ── Backup / Restore — safety net for archive data ─────────────────
+// Exports EVERY piece of user-saved data into one JSON file:
+//   • All server archive entries (if reachable)
+//   • All localStorage archive entries (weekly/monthly/quarterly)
+//   • Custom sections
+//   • Section overrides (renames / deletes)
+//   • Hidden embedded entries
+// The file lets the user restore everything later — independent of the
+// system version. Re-uploads of the system never touch this data, but
+// this gives an extra layer of safety.
+async function exportAllData() {
+  try {
+    _showToast('📥 Preparing backup...', '#3B82F6');
+    const backup = {
+      version: 1,
+      exported_at: new Date().toISOString(),
+      user: _userName || 'anonymous',
+      server_available: !!_serverAvailable,
+      ls_archive: {
+        weekly:    _lsArchiveLoadAll('weekly'),
+        monthly:   _lsArchiveLoadAll('monthly'),
+        quarterly: _lsArchiveLoadAll('quarterly'),
+      },
+      custom_sections: _customSections || [],
+      section_overrides: _sectionOverrides || {},
+      embedded_hidden: _embHiddenList(),
+      server_archive: { weekly: [], monthly: [], quarterly: [] },
+    };
+
+    // Fetch server entries (best effort)
+    if (_serverAvailable) {
+      for (const mode of ['weekly', 'monthly', 'quarterly']) {
+        try {
+          const r = await fetchWithTimeout('/api/archive/' + mode, {}, 4000);
+          if (r.ok) {
+            const arr = await r.json();
+            backup.server_archive[mode] = Array.isArray(arr) ? arr : [];
+          }
+        } catch (e) { /* skip mode on failure */ }
+      }
+    }
+
+    // Build a friendly filename: kabi-hc-backup-2026-06-04.json
+    const d = new Date();
+    const stamp = d.toISOString().slice(0, 10);
+    const fname = 'kabi-hc-backup-' + stamp + '.json';
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = fname;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+
+    const totals = {
+      ls: Object.keys(backup.ls_archive.weekly).length + Object.keys(backup.ls_archive.monthly).length + Object.keys(backup.ls_archive.quarterly).length,
+      sv: backup.server_archive.weekly.length + backup.server_archive.monthly.length + backup.server_archive.quarterly.length,
+    };
+    _showToast('✅ Backup downloaded: ' + (totals.sv + totals.ls) + ' entries (' + totals.sv + ' server + ' + totals.ls + ' local)');
+  } catch (err) {
+    console.error('exportAllData error', err);
+    _showToast('⚠ Backup failed — see console', '#EF4444');
+  }
+}
+
+function importAllData() {
+  // Open hidden file input
+  let input = document.getElementById('kabi-restore-input');
+  if (!input) {
+    input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.id = 'kabi-restore-input';
+    input.style.display = 'none';
+    input.onchange = _handleRestoreFile;
+    document.body.appendChild(input);
+  }
+  input.value = '';
+  input.click();
+}
+
+async function _handleRestoreFile(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const backup = JSON.parse(text);
+    if (!backup || typeof backup !== 'object' || backup.version !== 1) {
+      throw new Error('Invalid backup file');
+    }
+    const tot = {
+      ls: Object.keys(backup.ls_archive?.weekly || {}).length + Object.keys(backup.ls_archive?.monthly || {}).length + Object.keys(backup.ls_archive?.quarterly || {}).length,
+      sv: (backup.server_archive?.weekly?.length || 0) + (backup.server_archive?.monthly?.length || 0) + (backup.server_archive?.quarterly?.length || 0),
+      cs: (backup.custom_sections || []).length,
+      ov: Object.keys(backup.section_overrides || {}).length,
+    };
+    const ok = confirm(
+      'Restore from backup?\n\n'
+      + 'Backup contents:\n'
+      + '  • ' + tot.sv + ' server entries\n'
+      + '  • ' + tot.ls + ' local entries\n'
+      + '  • ' + tot.cs + ' custom sections\n'
+      + '  • ' + tot.ov + ' section overrides\n'
+      + '  • ' + (backup.embedded_hidden?.length || 0) + ' hidden historical entries\n\n'
+      + 'Exported by: ' + (backup.user || 'unknown') + ' on ' + (backup.exported_at || 'unknown') + '\n\n'
+      + 'MERGE strategy: existing entries with the same period will be REPLACED. New entries from the backup will be ADDED. Existing entries not in the backup will be PRESERVED.'
+    );
+    if (!ok) return;
+
+    let merged = { ls: 0, sv: 0, cs: 0, ov: 0 };
+
+    // 1) Merge LS archive
+    for (const mode of ['weekly','monthly','quarterly']) {
+      const obj = (backup.ls_archive && backup.ls_archive[mode]) || {};
+      const existing = _lsArchiveLoadAll(mode) || {};
+      const combined = Object.assign({}, existing, obj);
+      try {
+        _safeStorage.setItem('kabi_archive_' + mode, JSON.stringify(combined));
+        merged.ls += Object.keys(obj).length;
+      } catch (e) { console.error('merge ls', mode, e); }
+    }
+
+    // 2) Custom sections — merge unique by id
+    const existingCs = _customSections || [];
+    const csIds = new Set(existingCs.map(s => s.id));
+    (backup.custom_sections || []).forEach(s => {
+      if (!csIds.has(s.id)) { existingCs.push(s); csIds.add(s.id); merged.cs++; }
+    });
+    _customSections = existingCs;
+    try { _safeStorage.setItem('kabi_custom_sections', JSON.stringify(_customSections)); } catch (e) {}
+
+    // 3) Section overrides — backup wins
+    const newOv = Object.assign({}, _sectionOverrides || {}, backup.section_overrides || {});
+    _sectionOverrides = newOv;
+    try { _safeStorage.setItem('kabi_section_overrides', JSON.stringify(_sectionOverrides)); } catch (e) {}
+    merged.ov = Object.keys(backup.section_overrides || {}).length;
+
+    // 4) Embedded hidden — union
+    const existingHidden = new Set(_embHiddenList());
+    (backup.embedded_hidden || []).forEach(i => existingHidden.add(i));
+    try { _safeStorage.setItem('kabi_emb_hidden', JSON.stringify([...existingHidden])); } catch (e) {}
+
+    // 5) Server entries — push to server if available
+    if (_serverAvailable && backup.server_archive) {
+      for (const mode of ['weekly','monthly','quarterly']) {
+        const list = backup.server_archive[mode] || [];
+        for (const entry of list) {
+          const period = entry.period || entry.week;
+          if (!period) continue;
+          // Restore each section via PUT (merges, preserves other sections)
+          const sections = entry.sections || {};
+          const user = entry.lastSavedBy || backup.user || 'restore';
+          for (const secId of Object.keys(sections)) {
+            try {
+              const r = await fetchWithTimeout('/api/archive/' + mode + '/' + _slugify(period), {
+                method: 'PUT',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({ period, sectionId: secId, sectionData: sections[secId], user })
+              }, 6000);
+              if (r.ok) merged.sv++;
+            } catch (e) { console.error('restore server', mode, period, secId, e); }
+          }
+        }
+      }
+    }
+
+    _showToast('✅ Restore complete — ' + merged.sv + ' server + ' + merged.ls + ' local entries merged');
+    if (typeof searchArchive === 'function') setTimeout(searchArchive, 500);
+  } catch (err) {
+    console.error('importAllData error', err);
+    _showToast('⚠ Restore failed: ' + (err.message || 'see console'), '#EF4444');
+  }
+}
+
+
 
 
 
@@ -2235,6 +2462,159 @@ async function regenerateSectionFromSource(secId) {
   }
 }
 
+
+// ── exportArchive: download a JSON backup of all archive data ────────
+async function exportArchive() {
+  try {
+    _showToast('⏳ Gathering archive data…');
+    const backup = {
+      _kabi_backup_version: 1,
+      _created_at: new Date().toISOString(),
+      modes: { weekly: [], monthly: [], quarterly: [] },
+      localArchive: {},
+      customSections: _customSections || [],
+      sectionOverrides: _sectionOverrides || {},
+      embeddedHidden: _embHiddenList(),
+    };
+
+    // 1) Server entries
+    if (_serverAvailable) {
+      for (const mode of ['weekly', 'monthly', 'quarterly']) {
+        try {
+          const r = await fetchWithTimeout('/api/archive/' + mode, { method: 'GET' }, 6000);
+          if (r && r.ok) {
+            const items = await r.json();
+            if (Array.isArray(items)) {
+              for (const it of items) {
+                const slug = it.slug || it.period;
+                try {
+                  const r2 = await fetchWithTimeout('/api/archive/' + mode + '/' + encodeURIComponent(slug), { method: 'GET' }, 6000);
+                  if (r2 && r2.ok) {
+                    const data = await r2.json();
+                    backup.modes[mode].push(data);
+                  }
+                } catch (e) {}
+              }
+            }
+          }
+        } catch (e) { console.warn('Backup server fetch failed for', mode, e); }
+      }
+    }
+
+    // 2) LocalStorage entries
+    for (const mode of ['weekly', 'monthly', 'quarterly']) {
+      try {
+        const all = _lsArchiveLoadAll(mode);
+        backup.localArchive[mode] = all || {};
+      } catch (e) { backup.localArchive[mode] = {}; }
+    }
+
+    // 3) Trigger download
+    const fileName = 'kabi-archive-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(a.href); }, 100);
+
+    const totalServer = backup.modes.weekly.length + backup.modes.monthly.length + backup.modes.quarterly.length;
+    const totalLS = Object.values(backup.localArchive).reduce((sum, m) => sum + Object.keys(m).length, 0);
+    _showToast('✅ Backup saved — ' + totalServer + ' server + ' + totalLS + ' local entries');
+  } catch (err) {
+    console.error('exportArchive failed', err);
+    _showToast('⚠ Backup failed — see console', '#EF4444');
+  }
+}
+
+// ── importArchive: restore archive data from a backup JSON file ──────
+async function importArchive(event) {
+  try {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    event.target.value = '';
+
+    const text = await file.text();
+    let backup;
+    try { backup = JSON.parse(text); }
+    catch (e) {
+      alert('Could not parse the backup file. Make sure it is a valid JSON file from this app.');
+      return;
+    }
+
+    if (!backup._kabi_backup_version) {
+      const ok0 = confirm('This file does not look like a KABi backup. Try to import anyway?');
+      if (!ok0) return;
+    }
+
+    const totalSrv = (backup.modes?.weekly?.length || 0) + (backup.modes?.monthly?.length || 0) + (backup.modes?.quarterly?.length || 0);
+    const totalLS  = Object.values(backup.localArchive || {}).reduce((s, m) => s + Object.keys(m || {}).length, 0);
+    const ok = confirm(
+      'Restore archive data from this backup?\n\n' +
+      'Created: ' + (backup._created_at || 'unknown') + '\n' +
+      'Server entries: ' + totalSrv + '\n' +
+      'Local entries: ' + totalLS + '\n\n' +
+      'Existing entries with the same period will be OVERWRITTEN.'
+    );
+    if (!ok) return;
+
+    _showToast('⏳ Restoring backup…');
+    const stats = { server: 0, local: 0, custom: 0, overrides: 0 };
+
+    if (_serverAvailable && backup.modes) {
+      for (const mode of ['weekly', 'monthly', 'quarterly']) {
+        const list = backup.modes[mode] || [];
+        for (const entry of list) {
+          try {
+            const slug = entry.slug || _slugify(entry.period || '');
+            if (!slug) continue;
+            const r = await fetchWithTimeout('/api/archive/' + mode + '/' + encodeURIComponent(slug), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ entry: entry })
+            }, 8000);
+            if (r && r.ok) stats.server++;
+          } catch (e) { console.warn('Restore failed for', mode, entry, e); }
+        }
+      }
+    }
+
+    if (backup.localArchive) {
+      for (const mode of ['weekly', 'monthly', 'quarterly']) {
+        const modeData = backup.localArchive[mode] || {};
+        try {
+          const existing = _lsArchiveLoadAll(mode);
+          const merged = Object.assign({}, existing, modeData);
+          _safeStorage.setItem('kabi_archive_' + mode, JSON.stringify(merged));
+          stats.local += Object.keys(modeData).length;
+        } catch (e) { console.warn('LS restore failed for', mode, e); }
+      }
+    }
+
+    if (Array.isArray(backup.customSections)) {
+      _customSections = backup.customSections;
+      _safeStorage.setItem('kabi_custom_sections', JSON.stringify(_customSections));
+      stats.custom = _customSections.length;
+    }
+    if (backup.sectionOverrides && typeof backup.sectionOverrides === 'object') {
+      _sectionOverrides = backup.sectionOverrides;
+      _saveSectionOverrides();
+      stats.overrides = Object.keys(_sectionOverrides).length;
+    }
+    if (Array.isArray(backup.embeddedHidden)) {
+      _safeStorage.setItem('kabi_emb_hidden', JSON.stringify(backup.embeddedHidden));
+    }
+
+    _showToast('✅ Restored ' + stats.server + ' server + ' + stats.local + ' local entries · ' +
+               stats.custom + ' custom sections · ' + stats.overrides + ' overrides');
+    setTimeout(() => { if (typeof searchArchive === 'function') searchArchive(); }, 300);
+  } catch (err) {
+    console.error('importArchive failed', err);
+    _showToast('⚠ Restore failed — see console', '#EF4444');
+  }
+}
+
 // ── propagateCustomSectionsFromSource ─────────────────────────────
 // When the user generates monthly from weekly (or quarterly from monthly),
 // any *custom* section present in the source data is auto-added to the
@@ -2450,6 +2830,79 @@ window.clearSection = clearSection;
 let _isEditingArchive = false;
 let _editingArchiveCtx = null; // { slug, mode }
 
+
+// ── renameSection / deleteSection — work for ANY section (builtin or custom) ──
+function renameSection(secId) {
+  try {
+    const allSecs = getAllSections() || [];
+    const sec = allSecs.find(s => s.id === secId);
+    const currentName = sec ? sec.name : secId;
+    const newName = prompt('Rename section "' + currentName + '" to:', currentName);
+    if (newName === null) return;
+    const trimmed = String(newName).trim();
+    if (!trimmed || trimmed === currentName) return;
+
+    if (sec && !sec.builtin) {
+      // Custom section — update _customSections directly
+      const cs = _customSections.find(s => s.id === secId);
+      if (cs) cs.name = trimmed;
+      try { _safeStorage.setItem('kabi_custom_sections', JSON.stringify(_customSections)); } catch(e) {}
+    } else {
+      // Builtin — record in overrides
+      _sectionOverrides[secId] = Object.assign({}, _sectionOverrides[secId] || {}, { name: trimmed });
+      _saveSectionOverrides();
+    }
+
+    // Re-render the section title in-place
+    const nameEl = document.querySelector('#sec-' + secId + ' .sec-name');
+    if (nameEl) nameEl.textContent = trimmed;
+    // Refresh sidebar
+    const sortable = document.getElementById('side-sortable');
+    if (sortable && typeof buildSidebarHTML === 'function') {
+      const sideHTML = buildSidebarHTML();
+      const tmp = document.createElement('div');
+      tmp.innerHTML = sideHTML;
+      const newSortable = tmp.querySelector('#side-sortable');
+      if (newSortable) sortable.innerHTML = newSortable.innerHTML;
+    }
+
+    _showToast('✦ Section renamed to "' + trimmed + '"');
+  } catch (err) {
+    console.error('renameSection error', err);
+    _showToast('⚠ Could not rename — see console', '#EF4444');
+  }
+}
+
+function deleteSection(secId) {
+  try {
+    const allSecs = getAllSections() || [];
+    const sec = allSecs.find(s => s.id === secId);
+    const name = sec ? sec.name : secId;
+    const ok = confirm('Delete the "' + name + '" section?\n\nIt will be hidden from this dashboard for all periods. You can restore it from your browser console with:\n  localStorage.removeItem(\'kabi_section_overrides\')   (for builtins)\n  localStorage.removeItem(\'kabi_custom_sections\')   (for custom)');
+    if (!ok) return;
+
+    if (sec && !sec.builtin) {
+      _customSections = _customSections.filter(s => s.id !== secId);
+      try { _safeStorage.setItem('kabi_custom_sections', JSON.stringify(_customSections)); } catch(e) {}
+    } else {
+      _sectionOverrides[secId] = Object.assign({}, _sectionOverrides[secId] || {}, { deleted: true });
+      _saveSectionOverrides();
+    }
+
+    // Remove from DOM
+    const secEl = document.getElementById('sec-' + secId);
+    if (secEl) secEl.remove();
+    const sideWrap = document.querySelector('.side-item-wrap[data-secid="' + secId + '"]');
+    if (sideWrap) sideWrap.remove();
+
+    _showToast('🗑 "' + name + '" deleted');
+    if (typeof _checkEmptyMain === 'function') _checkEmptyMain();
+  } catch (err) {
+    console.error('deleteSection error', err);
+    _showToast('⚠ Could not delete — see console', '#EF4444');
+  }
+}
+
 // ── reopenSectionForNewEntry: rebuild a saved section as an empty form ──
 // Triggered by the "+ New" button on the gray .section-saved-note.
 // Lets the user enter a fresh update (potentially for a different period).
@@ -2549,7 +3002,7 @@ async function saveSectionToArchive(secId) {
         const res = await fetch(API_BASE + '/archive/' + CURRENT_MODE + '/' + encodeURIComponent(slug), {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ period: period, sectionId: secId, sectionData: secData, user: _userName || 'anonymous' })
+          body: JSON.stringify({ period: period, sectionId: secId, sectionData: secData, user: (secData.p && secData.p.trim()) || _userName || 'anonymous' })
         });
         if (res.ok) {
           savedToServer = true;
@@ -2565,7 +3018,7 @@ async function saveSectionToArchive(secId) {
     // Always also save to LS as a local cache / fallback (so it's visible even
     // if server is unreachable on this device, and so reopening the period
     // shows the per-section gray note).
-    const lsOk = _lsArchiveSaveSection(CURRENT_MODE, period, secId, secData, _userName);
+    const lsOk = _lsArchiveSaveSection(CURRENT_MODE, period, secId, secData, (secData.p && secData.p.trim()) || _userName || 'anonymous');
     if (!savedToServer && !lsOk) {
       throw new Error(lastErr || 'Save failed');
     }
@@ -2637,6 +3090,21 @@ async function _checkPeriodArchive() {
     } catch (e) { /* try LS next */ }
   }
   if (!entry) entry = _lsArchiveGet(CURRENT_MODE, slug);
+  // Also check HISTORICAL_DATA — pre-loaded entries should also trigger the warning
+  if (!entry && typeof HISTORICAL_DATA !== 'undefined') {
+    const hist = HISTORICAL_DATA.find(e =>
+      (e._mode || 'weekly') === CURRENT_MODE &&
+      _slugify(e.week || '') === slug
+    );
+    if (hist) {
+      entry = {
+        period: hist.week,
+        sections: hist.secs || {},
+        mode: CURRENT_MODE,
+        lastSavedBy: 'archive (historical)',
+      };
+    }
+  }
   if (!entry) return;
 
   const sections = (entry && entry.sections) ? Object.keys(entry.sections) : [];
@@ -2924,7 +3392,7 @@ async function archiveEntryPreview(slug, mode) {
       '</div>' +
       '<div style="margin-bottom:12px;font-weight:600;color:#374151;font-size:13px">Sections saved (' + Object.keys(sections).length + ')</div>' +
       (secCards || '<em style="color:#9CA3AF">No sections recorded</em>') +
-      '<div style="margin-top:18px;padding-top:14px;border-top:1px solid #E5E7EB;display:flex;justify-content:flex-end;gap:8px">' +
+      '<div style="margin-top:18px;padding-top:14px;border-top:1px solid #E5E7EB;display:flex;justify-content:center;gap:8px">' +
         '<button onclick="document.getElementById(\'simple-modal\').remove(); archiveEntryEdit(\'' + slug + '\',\'' + mode + '\');" ' +
         'style="background:linear-gradient(135deg, #10B981, #059669);color:#fff;border:none;padding:9px 18px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;">' +
         '✏️ Edit this entry</button>' +
@@ -3763,7 +4231,14 @@ function updateBadges() {
 
 // Override getAllSections to respect order
 function getAllSections() {
-  const allSecs = [...DEFAULT_SECTIONS, ..._customSections];
+  const allSecs = [...DEFAULT_SECTIONS, ..._customSections]
+    .map(s => {
+      const ov = _sectionOverrides[s.id];
+      if (!ov) return s;
+      if (ov.deleted) return null;
+      return Object.assign({}, s, ov.name ? { name: ov.name } : {});
+    })
+    .filter(Boolean);
   const order = getSectionOrder();
   const secMap = {};
   allSecs.forEach(s => secMap[s.id] = s);
@@ -4195,7 +4670,8 @@ const HISTORICAL_DATA =
 {"week":"March 2026","secs":{"ops":{"p":"Sultan","kp":[["2. Jisr","1. All offices completed"],["3. Employees requests","2. All requests have been solved and the second payment completed. And the data is controlled to move to ZenHR -    Rayan’s issue completed with the insurance broker. Maraheb’s gosi invoice resolved and her iqama was renewed successfully. Laith Iqama renewed successfully. Exit reentry for Karman."],["4. Abhi","4. Invoices with the finance team for two employees."],["5. Promotions and increments","5. Completed the letters and waiting for approval"]],"ac":["Payroll completed","Employee requests handled","Data is almost ready for migration to ZenHR","Promotions and increment letters finalized","Induction File for new joiners"],"ch":[["1. Incomplete employee records requiring validation and completion","1. Collect missing employee data and ensure accurate migration to ZenHR"],["2. Managing employee requests during transition","2. Ensure continuous support and prioritize urgent employee requests during the transition"],["New joiners were being introduced to the company through a company profile instead of a structured onboarding/induction material, leading to gaps in understanding and engagement.",""],["Developed and implemented a comprehensive induction file tailored for new joiners to ensure a structured, informative, and engaging onboarding experience.",""]],"nw":["Moving to ZenHR"]},"hcdev":{"p":"Njood","kp":[["1. PM: Performance Appraisal",""]],"ac":["Updated job levels and career path","All Sectors performance evaluation has been shared","Promotion & Increment letters with email template"],"ch":[],"nw":["Updated PMS for 2026","Closing promotions for all departments."]},"ic":{"p":"Njood","kp":[["1. KABi Store","Maha requested us to submit a request to release her from the Tech Team for two days after the cyber security check conducted by Khalid Almohammadi. Change the credit card of Hassan for server monthly payment"],["2. IC: Monthly recap of Mar","2. Ready to be shared"],["3. IC: 1st Quarter update","3. Ready to be shared"],["4. IC: Ramadan Iftar","4. Done with the winner announcement and gifts"],["5. IC: Eid Celebration and arrangements","5. Done (Saudi Coffee Payment Pending)"],["6. Other: KABi Cups","6. Ready to order KABi paper cups (pending approval)"]],"ac":["Monthly recap of Feb","Gifts received to the winners in Iftar","Ramadan Iftar","Eid Vacation and remote work announcement","Eid Celebration","Eid Giveaways & all celebration arrangements are ready","Monthly Recap & Q1 update are ready to be shared"],"ch":[],"nw":["Follow up for KABi store","April Activity Plan","Share Monthly recap of Mar and 1st Quarter updated with MENA"]},"ta":{"p":"Fay & Layan","kp":[["1. LinkedIn Candidate Sourcing – Frontend Role.","1. Sourced 15 potential candidates for the Frontend Developer role via LinkedIn based on Mashael’s request and shared them with her."],["2. Product Trainees Onboarding Coordination","2. Aligned with Dr. Ameera for Fahad Aldosari to start onboarding in the week of her return from leave."],["3. Interview Feedback Follow-up","3. Followed up with Salah, Modallal, and Ihab regarding interview feedback; responses were received via email."],["4. Attendance & Timesheet (March 25–26)","4. Prepared and organized attendance and timesheet records for March 25–26 as requested by Mr. Sultan, and submitted them accordingly."],["5. Job Terminology Translation","5. Translated a set of job-related terms provided by Mr. Sultan to support internal documentation."]],"ac":["Published 9 software job postings in the HYRDD system","Frontend Developer interviews conducted (Job Opportunity)","Software Development & AI interviews conducted (GDP)","Malak Bourji’s interview conducted (Job Opportunity)","Attendance & Timesheet (March 25–26)","Job Terminology Translation"],"ch":[],"nw":["Follow up on onboarding of Product trainees","Coordinate and schedule interviews for the upcoming GDP"]},"it":{"p":"Osama","kp":[],"ac":[],"ch":[],"nw":["Planning to…","Planning to…","Planning to…","Planning to…","Planning to…"]},"fac":{"p":"Laith","kp":[["1. Eid requirements","Completed — Purchasing and supporting all the needs of the iftar party"],["2. Monthly maintenance","Completed — Monitoring and improving the items in the office and maintaining them on a daily basis"],["3. Monthly purchases","Completed — All employee needs, hospitality, and maintenance"],["4. Support the internal communication team","Completed — Support the team and meet all their needs throughout the whole month"],["5. All pending invoices","Completed — Sent to management and resolved"],["6. Eid and Ramadan events","Completed — All set and paid"]],"ac":["All 6 monthly facility tasks completed (Eid requirements, maintenance, purchases, IC support, pending invoices, Eid/Ramadan events)","Facility tickets resolved: 1 repair (small meeting room), 8 equipment purchases (1 office + 6 Eid/Ramadan + 1 farewell cake), 0 guests for Mr. Khalid Aloraij","Monthly purchases total: SR 11,964 across 9 vendors (Inshial 4,830 · Lawazeem 1,912 · Chefz 1,437 · Sahaib masif 1,050 · Ninja 811 · UL 717 · Jahez 701 · Flawred 314 · Noon 192)"],"ch":[],"nw":[]}},"_mode":"monthly"},
 {"week":"Q1 2026","secs":{"ops":{"p":"Sultan","kp":[["Payroll (all 3 months)","All offices processed successfully via Jisr (Jan, Feb, Mar)"],["GDP & COOP Onboarding","All required documents signed and uploaded to Jisr; trainees onboarded with announcements"],["Annual Gathering","All arrangements finalized and coordinated; payments resolved with Finance"],["Jisr — Second Payment","Second payment for 2026 processed; data prepared for migration to ZenHR"],["KSU Career Fair","Attended as planned"],["Probation Period Evaluations","Evaluation forms sent to both managers and employees for review"],["Promotions & Increments","Letters finalized and pending approval"],["Master Sheet / Data Centralization","Employee database initiated"]],"ac":["Q1 payroll completed for all offices (Jan, Feb, Mar)","GDP documents & COOP onboarding completed (Layan Alzaid, Rema Alqasem)","Annual Gathering held successfully","Performance data 2023–2025 prepared and shared","KSU career fair attended","Jisr second payment processed","Probation evaluations completed","Promotion and increment letters finalized","Comprehensive induction file developed for new joiners","Employee data validated and prepared for ZenHR migration"],"ch":[["Incomplete employee documentation across offices","Collect missing documents during onboarding follow-ups"],["Rayan Alowais' medical insurance — treatment not covered under current policy","Resolved with insurance broker"],["Master Sheet data gaps — incomplete employee records","Validate and complete records for accurate ZenHR migration"],["Managing employee requests during transition to ZenHR","Prioritize urgent requests; ensure continuous support"]],"nw":["Complete migration to ZenHR (Q2 2026)","Finalize promotion approvals"]},"hcdev":{"p":"Njood","kp":[["PM Cycle — Performance Appraisal","100% completion via Jisr; reports shared with line managers; PM Cycle Complete email sent to MENA"],["Career Paths & Development","Reviewed and updated across teams"]],"ac":["Performance Management cycle 100% complete across MENA","Final reports shared with line managers","Employee 1:1s emails distributed","Career path frameworks updated"],"ch":[],"nw":["Q2 development planning","Career path implementation follow-up"]},"ic":{"p":"Njood","kp":[["Quarterly Updates","4th Quarter 2025 updates shared with MENA"],["KABi Store — Technical Issue","Followed up; credit card for Hassan updated for server monthly payment"],["Internal Announcements","All onboarding, events, and operational announcements published on schedule"]],"ac":["Quarterly internal communications delivered to MENA","KABi Store technical issues resolved","Cybersecurity check coordinated with Khalid Almohammadi","Onboarding announcements published for all new joiners"],"ch":[],"nw":["Q2 communications rollout","Continued KABi Store support"]},"ta":{"p":"Fay & Layan","kp":[["GDP Recruitment (Jan)","Interviews 30 / Accepted 11 — all joined in January"],["COOP Recruitment (Jan)","Interviews 5 / Accepted 2 (Layan Alzaid, Rema Alqasem)"],["HYRDD System Updates","Added COOP, Internship, and GDP candidates under relevant roles"],["LinkedIn Sourcing — Frontend Role (Mar)","15 potential candidates sourced and shared with hiring manager"],["KSU Career Fair","Attended in February"]],"ac":["Q1 TA Accepted: 13 total (GDP 11 + COOP 2 in January)","HYRDD system populated with all active candidates","Career fair representation at KSU","GDP trainees data maintained on Excel and Jisr","Onsite and online interviews coordinated across GDP, COOP, internship, and job opportunities"],"ch":[],"nw":["Continue Frontend role sourcing","Q2 recruitment pipeline expansion"]},"it":{"p":"Osama","kp":[["GDP Prep and Inductions","Devices and emails prepared and delivered on induction days"],["New Joiners Setup (Jordan)","Moath Alkhatib and Yanal Jaziah email setup completed"],["New Joiner Setup (KSA)","Jory Alshridah email and device delivered on induction day"],["MCIT Minister Visit Support","5 laptops prepared and on-site support provided"],["Annual Gathering Setup","Technical setup completed"],["SIMs and Phones","Handed over to GDP trainees"]],"ac":["Q1 IT tickets: 12 resolved (Jan 6 + Feb 6) · 100% resolution rate","Prepared and supported MCIT ministerial visit","Annual Gathering technical setup completed","New joiner setups: GDP (13), Yanal, Moath, Jory","SIM cards and phones distributed to all GDP trainees"],"ch":[],"nw":["Continue end-user support and device lifecycle management"]},"fac":{"p":"Laith","kp":[["Annual Party (Jan)","Completed — All purchasing and support delivered"],["Minister Visit (Jan)","Completed — Tools, ceremonies, and parking arranged"],["Team-Building Event (Jan)","Completed — Purchasing and planning delivered"],["Eid & Ramadan Events (Mar)","Completed — All arrangements set and paid"],["Monthly Maintenance (Jan–Mar)","Daily monitoring and improvement of office items"],["IC Team Support (Jan–Mar)","Continuous support delivered throughout the quarter"]],"ac":["Q1 Facility spend: SR 25,426 (Jan SR 13,462 + Mar SR 11,964)","Two major events delivered: Annual Party (Jan) + Eid/Ramadan + Iftar (Mar)","Q1 Tickets: all repairs, purchases, and guest welcomes resolved (Jan: 1 repair + 38 purchases + 20 guests; Mar: 1 repair + 8 purchases)","All pending invoices resolved by end of March","Continuous monthly maintenance and IC team support delivered"],"ch":[],"nw":["Q2 facility planning and budget tracking"]}},"_mode":"quarterly"},
 {"week":"April 2026","secs":{"ops":{"p":"Sultan","kp":[],"ac":[],"ch":[],"nw":["Planning to…","Planning to…","Planning to…","Planning to…","Planning to…"]},"hcdev":{"p":"Njood","kp":[],"ac":[],"ch":[],"nw":["Planning to…","Planning to…","Planning to…","Planning to…","Planning to…"]},"ic":{"p":"Njood","kp":[],"ac":[],"ch":[],"nw":["Planning to…","Planning to…","Planning to…","Planning to…","Planning to…"]},"ta":{"p":"Jory","kp":[],"ac":[],"ch":[],"nw":["Planning to…","Planning to…","Planning to…","Planning to…","Planning to…"]},"it":{"p":"Osama","kp":[["1. SIM & Phones","1. Completed, Phones has been hand overed to the GDP"],["2. Claude Enrollment","2. Complete, , office app Add-in has been enrolled org wide and employee are able to connect to Microsoft 365 using Claude connect without issue. Supporting employee on setting up Claude on their devices and guide them on how ot use it"],["3. New joiner Fahad","3. Completed, IT onboarding and device has been handover."],["4. Asset Check","4. Completed, all Asset from all offices are up to date"],["5. Fingerprint integration","5. Completed."]],"ac":["SIM and Phone Bought and prepared within few days of request","Enroll Claude Org wise and support employees with install and issues","Fahad IT onboarding","Fingerprint Integration with ZenHR"],"ch":[],"nw":[]},"fac":{"p":"Laith","kp":[],"ac":[],"ch":[],"nw":["Planning to…","Planning to…","Planning to…","Planning to…","Planning to…"]}},"_mode":"monthly"},
-{"week":"May 2026","secs":{"ta":{"p":"Fay","kp":[["LOGIC Initiative Participation","Done","Attended the LOGIC Initiative (May 3–5), supported the Inviews product, and ran CV clinic sessions for students"],["Attendance System Development – Q1 2026","In Progress","Developed an attendance tracking system; shared with Mashael — pending approval"],["Employee 1:1 Meetings & HR Feedback Dashboard","Done","Layan held 1:1 meetings with the Jordan and Palestine branches with Ms. Sahaba and built an HR Feedback Dashboard"],["KABi Pathway Program Development","In Progress","Developed the Co-op track and enhanced the Internship track — shared with Sahabah — pending approval"],["KABi Onboarding Files","In Progress","Prepared two onboarding files (employees and managers) — shared with Sahabah — pending approval"],["Screening & Shortlisting – 23 Candidates","Done","23 candidates screened & shortlisted: 10 Tech + 5 GDP added to the dashboard, and 8 Co-op & Internship shared with Sultan"],["Shortlist & Longlist Dashboard","Done","Built a dedicated dashboard for tracking shortlisted and longlisted candidates"],["GDP Interviews & Initial Selection","Done","Conducted 3 GDP interviews with stakeholders; all 3 accepted (Abdulaziz, Azzam & Alaa) and shared with Mashael"],["GDP Candidate Processing – Abdullah Al-Dafas","Done","Processed in the system and ensured completion of psychometric and technical assessments"],["Trainee Certification Issuance","Done","Prepared and issued certificates for trainees and shared with Sultan"],["External Communication – Insurance Companies","In Progress","Contacted insurance companies in Palestine and Jordan via email — pending follow-up"],["Senior Frontend – Shortlist Sharing","Done","Shared the shortlist file for Lujain (Senior Frontend) with Mashael"]],"ac":["LOGIC Initiative participation (CV clinics & Inviews support)","Attendance tracking system developed (Q1 2026)","HR Feedback Dashboard built from branch 1:1 meetings","KABi Pathway program & onboarding files prepared","23 candidates screened & shortlisted (10 Tech + 5 GDP on dashboard; 8 trainees to Sultan)","Shortlist & Longlist dashboard built; 3 GDP candidates interviewed & accepted"],"ch":[["HiredIn AI Interviews — Psychometric & Technical results appear as \"Blocked\"","Reached out to Mr. Abdullah Hamed — issue has been resolved"]],"nw":["Continue Tech department sourcing, screening & shortlisting","Directly follow up with the 3 GDP new joiners (Abdulaziz, Azzam & Alaa)","Upon approval — develop PowerPoint presentations for KABi Pathway Program & Onboarding files","Update Tech dashboard (shortlist & longlist incl. GDP) and share via email"]},"hcdev":{"p":"Njood","kp":[["PM: Performance Management","In Progress","Developing the PMS with generating AI Agents"],["PMS AI Agent","Done","Connecting the AI Agent with Pipedrive and testing to measure results accuracy with Dr. Abdullah"],["Non-FTE & X-KABians","Done","Including Non-FTE & X-KABians in the system"],["Offboarding system","In Progress","Develop offboarding system to be integrated with PMS"],["Exit interview data","On Hold","Gathered from Sultan to be centralized in the system"]],"ac":["Connecting the AI Agent with Pipedrive","Connected the AI Agent with Pipedrive and tested the results with Dr. Abdullah","Included Non-FTE & X-KABians in the system","Developed 1st version of offboarding system and presented to Mashael & Sahabah","Gathered exit interview data of all X-KABians to be centralized in the system"],"ch":[["Building AI Agents with almost zero background in developing AI tools","Learn step by step with Claude"]],"nw":["Testing the results of the AI Agent after Pipedrive connecting to measure the level of accuracy","Present the updated PMS with AI Agents for the leadership","Connecting the other departments' used systems with AI Agents after leadership approval","Testing AI Agent results after Pipedrive connection to measure accuracy with Dr. Abdullah","Updating and integrating the offboarding system with PMS","Test the full cycle in the system for every user","Present updated PMS with AI Agents & offboarding system to leadership","Connecting other departments' used systems with AI Agents after leadership approval"]},"ic":{"p":"Njood","kp":[["IC: Monthly recap of Apr","Done","Shared with MENA on Mon, 4th of May"],["IC: Eid Al-Fitr Celebration Payment","Done","Saudi coffee payment done"],["IC: May Activity plan","In Progress","World Culture Day, the proposed plan in progress"],["IC: Eid Al-Adha's Holiday Announcement","Done","Shared with Sahabah & Sultan"],["IC: Monthly recap of May","In Progress",""],["IC: May Activity plan + Eid Al-Adha's celebration","In Progress","World Culture Day proposed plan in progress; will share with budget for approval by end of week"],["Monthly recap of May","In Progress",""],["May Activity plan","Done","World Culture Day (21 May): announcement shared with KABi Riyadh"],["Eid Al-Adha's celebration","In Progress","Proposed plan and vendors shared with budget; waiting for approval"],["International HR Day","In Progress","Proposed announcement shared and waiting for approval to share with MENA"]],"ac":["Shared Monthly Recap of Apr with MENA","Eid Al-Adha's Holiday Announcement","Saudi coffee payment done","Eid Al-Adha's Celebration Plan finalized with budget","World Culture Day (21 May) announcement shared","Proposed announcement of International HR Day prepared"],"ch":[],"nw":["Share the approved Announcement of Eid Al-Adha's Holiday","Organizing for World Cultures Day after approval","Start preparing monthly recap of May","Start gathering data for 2nd Quarter Updates","Prepare a plan for Eid Al-Adha simple celebration after holiday","Organizing for World Cultures Day and Eid Al-Adha's celebration after approval","Complete preparing monthly recap of May","Start coordinating with vendors of Eid Al-Adha's Celebration after approval"]},"it":{"p":"Osama","t":"14","c1n":"Hardware","c1l":"4","c2n":"Email","c2l":"4","c3n":"Clearance","c3l":"5","tk":[["Hardware","Resolved","Issues with laptop keyboard"],["Email","Resolved","Request to create a shared email for Account managers"],["Email","Resolved","Request to create a shared email for Misk Project (support email)"],["Software","Resolved","Problems with Claude app install"],["Leave","Resolved","Sameh Tolba has left; receive any asset and lock his email"],["Hardware","Resolved","Issues with laptop not charging"],["Clearance","Resolved","Nouf Alfayez has left the company; close her email and receive assets"],["Clearance","Resolved","Jury Alsharidah left the company; close her email and receive assets"],["Email","Resolved","Emails not received by client"],["Software","Resolved","Request to install PDF app"],["Hardware","Resolved","Faisal's laptop has been shutting down multiple times"],["Email","Resolved","Request to reactivate kabi.sa domain in Microsoft for email"],["Email","Resolved","Request to create Aliases (a second email address) for all KABi employees"],["Clearance","Resolved","Request to close multiple employee emails in Jordan office"]],"kp":[["Prepare and upload all Assets to ZenHR","Done","Put on hold; all asset information is in Excel shared with Sahaba"],["Prepare and upload all Custodys to ZenHR","Done","Put on hold; all custody information is in OneDrive shared with Sahaba"]],"ac":["kabi.sa aliases for all employees","Clearance for Jury and Nouf","Clearance for employees in Jordan","Prepared custodies to be signed for Jordan and Palestine employees","Uploaded all assets information to Excel","Uploaded and organized all custodies to OneDrive file"],"ch":[],"nw":[]},"fac":{"p":"Laith","tk":[["Guest","Done","4 guests for Mr. Khalid"],["Repairs","Done","1 repair for pray area"],["Purchase","Done","2 gifts for the employees"]],"kp":[["Monthly and weekly purchases","Done",""],["Change tea boy","Done",""],["Eid party arrange","Done",""]],"ac":["Change tea boy","Monthly and weekly purchases","Eid party"],"ch":[],"nw":[],"pr":[["Lawazeem","2872.86 SR"],["Ninja","3533 SR"],["Noon","115 SR"],["The Chefz","553 SR"]],"pt":"7073.86 SR"}},"_mode":"monthly"}
+{"week":"May 2026","secs":{"ta":{"p":"Fay","kp":[["LOGIC Initiative Participation","Done","Attended the LOGIC Initiative (May 3–5), supported the Inviews product, and ran CV clinic sessions for students"],["Attendance System Development – Q1 2026","In Progress","Developed an attendance tracking system; shared with Mashael — pending approval"],["Employee 1:1 Meetings & HR Feedback Dashboard","Done","Layan held 1:1 meetings with the Jordan and Palestine branches with Ms. Sahaba and built an HR Feedback Dashboard"],["KABi Pathway Program Development","In Progress","Developed the Co-op track and enhanced the Internship track — shared with Sahabah — pending approval"],["KABi Onboarding Files","In Progress","Prepared two onboarding files (employees and managers) — shared with Sahabah — pending approval"],["Screening & Shortlisting – 23 Candidates","Done","23 candidates screened & shortlisted: 10 Tech + 5 GDP added to the dashboard, and 8 Co-op & Internship shared with Sultan"],["Shortlist & Longlist Dashboard","Done","Built a dedicated dashboard for tracking shortlisted and longlisted candidates"],["GDP Interviews & Initial Selection","Done","Conducted 3 GDP interviews with stakeholders; all 3 accepted (Abdulaziz, Azzam & Alaa) and shared with Mashael"],["GDP Candidate Processing – Abdullah Al-Dafas","Done","Processed in the system and ensured completion of psychometric and technical assessments"],["Trainee Certification Issuance","Done","Prepared and issued certificates for trainees and shared with Sultan"],["External Communication – Insurance Companies","In Progress","Contacted insurance companies in Palestine and Jordan via email — pending follow-up"],["Senior Frontend – Shortlist Sharing","Done","Shared the shortlist file for Lujain (Senior Frontend) with Mashael"]],"ac":["LOGIC Initiative participation (CV clinics & Inviews support)","Attendance tracking system developed (Q1 2026)","HR Feedback Dashboard built from branch 1:1 meetings","KABi Pathway program & onboarding files prepared","23 candidates screened & shortlisted (10 Tech + 5 GDP on dashboard; 8 trainees to Sultan)","Shortlist & Longlist dashboard built; 3 GDP candidates interviewed & accepted"],"ch":[["HiredIn AI Interviews — Psychometric & Technical results appear as \"Blocked\"","Reached out to Mr. Abdullah Hamed — issue has been resolved"]],"nw":["Continue Tech department sourcing, screening & shortlisting","Directly follow up with the 3 GDP new joiners (Abdulaziz, Azzam & Alaa)","Upon approval — develop PowerPoint presentations for KABi Pathway Program & Onboarding files","Update Tech dashboard (shortlist & longlist incl. GDP) and share via email"]},"hcdev":{"p":"Njood","kp":[["PM: Performance Management","In Progress","Developing the PMS with generating AI Agents"],["PMS AI Agent","Done","Connecting the AI Agent with Pipedrive and testing to measure results accuracy with Dr. Abdullah"],["Non-FTE & X-KABians","Done","Including Non-FTE & X-KABians in the system"],["Offboarding system","In Progress","Develop offboarding system to be integrated with PMS"],["Exit interview data","On Hold","Gathered from Sultan to be centralized in the system"]],"ac":["Connecting the AI Agent with Pipedrive","Connected the AI Agent with Pipedrive and tested the results with Dr. Abdullah","Included Non-FTE & X-KABians in the system","Developed 1st version of offboarding system and presented to Mashael & Sahabah","Gathered exit interview data of all X-KABians to be centralized in the system"],"ch":[["Building AI Agents with almost zero background in developing AI tools","Learn step by step with Claude"]],"nw":["Testing the results of the AI Agent after Pipedrive connecting to measure the level of accuracy","Present the updated PMS with AI Agents for the leadership","Connecting the other departments' used systems with AI Agents after leadership approval","Testing AI Agent results after Pipedrive connection to measure accuracy with Dr. Abdullah","Updating and integrating the offboarding system with PMS","Test the full cycle in the system for every user","Present updated PMS with AI Agents & offboarding system to leadership","Connecting other departments' used systems with AI Agents after leadership approval"]},"ic":{"p":"Njood","kp":[["IC: Monthly recap of Apr","Done","Shared with MENA on Mon, 4th of May"],["IC: Eid Al-Fitr Celebration Payment","Done","Saudi coffee payment done"],["IC: May Activity plan","In Progress","World Culture Day, the proposed plan in progress"],["IC: Eid Al-Adha's Holiday Announcement","Done","Shared with Sahabah & Sultan"],["IC: Monthly recap of May","In Progress",""],["IC: May Activity plan + Eid Al-Adha's celebration","In Progress","World Culture Day proposed plan in progress; will share with budget for approval by end of week"],["Monthly recap of May","In Progress",""],["May Activity plan","Done","World Culture Day (21 May): announcement shared with KABi Riyadh"],["Eid Al-Adha's celebration","In Progress","Proposed plan and vendors shared with budget; waiting for approval"],["International HR Day","In Progress","Proposed announcement shared and waiting for approval to share with MENA"]],"ac":["Shared Monthly Recap of Apr with MENA","Eid Al-Adha's Holiday Announcement","Saudi coffee payment done","Eid Al-Adha's Celebration Plan finalized with budget","World Culture Day (21 May) announcement shared","Proposed announcement of International HR Day prepared"],"ch":[],"nw":["Share the approved Announcement of Eid Al-Adha's Holiday","Organizing for World Cultures Day after approval","Start preparing monthly recap of May","Start gathering data for 2nd Quarter Updates","Prepare a plan for Eid Al-Adha simple celebration after holiday","Organizing for World Cultures Day and Eid Al-Adha's celebration after approval","Complete preparing monthly recap of May","Start coordinating with vendors of Eid Al-Adha's Celebration after approval"]},"it":{"p":"Osama","t":"14","c1n":"Hardware","c1l":"4","c2n":"Email","c2l":"4","c3n":"Clearance","c3l":"5","tk":[["Hardware","Resolved","Issues with laptop keyboard"],["Email","Resolved","Request to create a shared email for Account managers"],["Email","Resolved","Request to create a shared email for Misk Project (support email)"],["Software","Resolved","Problems with Claude app install"],["Leave","Resolved","Sameh Tolba has left; receive any asset and lock his email"],["Hardware","Resolved","Issues with laptop not charging"],["Clearance","Resolved","Nouf Alfayez has left the company; close her email and receive assets"],["Clearance","Resolved","Jury Alsharidah left the company; close her email and receive assets"],["Email","Resolved","Emails not received by client"],["Software","Resolved","Request to install PDF app"],["Hardware","Resolved","Faisal's laptop has been shutting down multiple times"],["Email","Resolved","Request to reactivate kabi.sa domain in Microsoft for email"],["Email","Resolved","Request to create Aliases (a second email address) for all KABi employees"],["Clearance","Resolved","Request to close multiple employee emails in Jordan office"]],"kp":[["Prepare and upload all Assets to ZenHR","Done","Put on hold; all asset information is in Excel shared with Sahaba"],["Prepare and upload all Custodys to ZenHR","Done","Put on hold; all custody information is in OneDrive shared with Sahaba"]],"ac":["kabi.sa aliases for all employees","Clearance for Jury and Nouf","Clearance for employees in Jordan","Prepared custodies to be signed for Jordan and Palestine employees","Uploaded all assets information to Excel","Uploaded and organized all custodies to OneDrive file"],"ch":[],"nw":[]},"fac":{"p":"Laith","tk":[["Guest","Done","4 guests for Mr. Khalid"],["Repairs","Done","1 repair for pray area"],["Purchase","Done","2 gifts for the employees"]],"kp":[["Monthly and weekly purchases","Done",""],["Change tea boy","Done",""],["Eid party arrange","Done",""]],"ac":["Change tea boy","Monthly and weekly purchases","Eid party"],"ch":[],"nw":[],"pr":[["Lawazeem","2872.86 SR"],["Ninja","3533 SR"],["Noon","115 SR"],["The Chefz","553 SR"]],"pt":"7073.86 SR"},"transformation":{"p":"Njood","kp":[["1. Vendor Meetings & Demo Sessions","Held vendor meetings with RemotePass, Ontop, and Deel. Deel eliminated after first demo due to high pricing; evaluation narrowed to Ontop vs RemotePass."],["2. Platform Evaluation — Ontop vs RemotePass","Comprehensive comparison for onboarding contractors (Palestine/Jordan) covering full process flow and geographic coverage across multiple platform walkthroughs."],["3. Contract & Next Steps","Agreement reached with RemotePass after price negotiations; contract received, reviewed and signed by KABi after required financial and legal documents from RemotePass were received."],["4. Contractor Migration to RemotePass","Successfully migrated all contractor contracts (Jordan & Palestine) to RemotePass, with contracts attached individually for each contractor."],["5. IP Protection Addendum","Created a separate rights-preservation addendum for each contractor, shared with them prior to contract migration."],["6. 1:1 Contractor Sessions","Conducted individual meetings with all contractors to address questions and provide an overview of the RemotePass platform."],["7. Contractor Onboarding on RemotePass","Completed onboarding of all Jordan and Palestine contractors on the platform following invitation delivery."],["8. RemotePass Platform Setup","Configured full setups such as approval workflow on RemotePass."],["9. Billing Cycle Definition","Met with Mariam to define and align on the billing cycle setup on RemotePass."]],"ac":["Vendor evaluation completed; RemotePass selected as KABi's contractor payment platform","Contract received from RemotePass and signed by KABi after legal review by leadership","All contractor contracts successfully migrated to RemotePass (Jordan & Palestine)","Individual IP protection addendum created and shared with each contractor","1:1 sessions completed with all contractors prior to contract signing","Full contractor onboarding on RemotePass completed"],"ch":[],"nw":[]}},"_mode":"monthly","_customSections":[{"id":"transformation","name":"Transformation","badge":"07","color":"#6B3FA0","builtin":false}]},
+{"week":"Q2 2026","secs":{"transformation":{"p":"Njood","kp":[["1. Vendor Meetings & Demo Sessions","Held vendor meetings with RemotePass, Ontop, and Deel. Deel eliminated after first demo due to high pricing; evaluation narrowed to Ontop vs RemotePass."],["2. Platform Evaluation — Ontop vs RemotePass","Comprehensive comparison for onboarding contractors (Palestine/Jordan) covering full process flow and geographic coverage across multiple platform walkthroughs."],["3. Contract & Next Steps","Agreement reached with RemotePass after price negotiations; contract received, reviewed and signed by KABi after required financial and legal documents from RemotePass were received."],["4. Contractor Migration to RemotePass","Successfully migrated all contractor contracts (Jordan & Palestine) to RemotePass, with contracts attached individually for each contractor."],["5. IP Protection Addendum","Created a separate rights-preservation addendum for each contractor, shared with them prior to contract migration."],["6. 1:1 Contractor Sessions","Conducted individual meetings with all contractors to address questions and provide an overview of the RemotePass platform."],["7. Contractor Onboarding on RemotePass","Completed onboarding of all Jordan and Palestine contractors on the platform following invitation delivery."],["8. RemotePass Platform Setup","Configured full setups such as approval workflow on RemotePass."],["9. Billing Cycle Definition","Met with Mariam to define and align on the billing cycle setup on RemotePass."]],"ac":["Vendor evaluation completed; RemotePass selected as KABi's contractor payment platform","Contract received from RemotePass and signed by KABi after legal review by leadership","All contractor contracts successfully migrated to RemotePass (Jordan & Palestine)","Individual IP protection addendum created and shared with each contractor","1:1 sessions completed with all contractors prior to contract signing","Full contractor onboarding on RemotePass completed"],"ch":[],"nw":[]}},"_mode":"quarterly","_customSections":[{"id":"transformation","name":"Transformation","badge":"07","color":"#6B3FA0","builtin":false}]}
 ];
 
 // Store 2025 data in localStorage on first load
@@ -4333,6 +4809,15 @@ const DEFAULT_SECTIONS = [
 ];
 
 let _customSections = JSON.parse(_safeStorage.getItem('kabi_custom_sections') || '[]');
+// Per-section overrides for builtin sections: { secId: { name?: string, deleted?: bool } }
+let _sectionOverrides = (function() {
+  try { return JSON.parse(_safeStorage.getItem('kabi_section_overrides') || '{}'); }
+  catch (e) { return {}; }
+})();
+function _saveSectionOverrides() {
+  try { _safeStorage.setItem('kabi_section_overrides', JSON.stringify(_sectionOverrides)); }
+  catch (e) { console.error('save overrides failed', e); }
+}
 const SECTION_COLORS = ['#0a3260','#1a4080','#1d6b4f','#2864AA','#2a7a8a','#1B2631','#6B3FA0','#AA6428','#2E4057','#8B4513'];
 
 function getNextSectionId() {
@@ -4449,7 +4934,7 @@ function buildStandardSectionHTML(sec) {
   let html = '<div class="section" id="sec-' + sec.id + '">'
     + '<div class="sec-hdr"><div class="sec-left"><div class="sec-badge" style="background:' + sec.color + '">' + sec.badge + '</div>'
     + '<div><div class="sec-name">' + sec.name + '</div>'
-    + '<div class="prow">Presenter:<input class="p-inp" data-s="' + sec.id + '" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + sec.id + '" onclick="regenerateSectionFromSource(\'' + sec.id + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg> Generate</button><button class="sec-clear-btn" data-sec="' + sec.id + '" onclick="clearSection(\'' + sec.id + '\')" title="Clear section data"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"vertical-align:-2px\"><polyline points=\"3 6 5 6 21 6\"/><path d=\"M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6\"/></svg> Clear</button><button class="sec-save-btn" data-sec="' + sec.id + '" onclick="saveSectionToArchive(\'' + sec.id + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : (CURRENT_MODE === 'weekly' ? '<button class="sec-save-btn" data-sec="' + sec.id + '" onclick="saveSectionToArchive(\'' + sec.id + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : '')) + '</div>'
+    + '<div class="prow">Presenter:<input class="p-inp" data-s="' + sec.id + '" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + sec.id + '" onclick="regenerateSectionFromSource(\'' + sec.id + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg> Generate</button><button class="sec-clear-btn" data-sec="' + sec.id + '" onclick="clearSection(\'' + sec.id + '\')" title="Clear section data"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"vertical-align:-2px\"><polyline points=\"3 6 5 6 21 6\"/><path d=\"M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6\"/></svg> Clear</button><button class="sec-rename-btn" data-sec="' + sec.id + '" onclick="renameSection(\'' + sec.id + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-del-btn" data-sec="' + sec.id + '" onclick="deleteSection(\'' + sec.id + '\')" title="Delete this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Delete</button><button class="sec-save-btn" data-sec="' + sec.id + '" onclick="saveSectionToArchive(\'' + sec.id + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : (CURRENT_MODE === 'weekly' ? '<button class="sec-rename-btn" data-sec="' + sec.id + '" onclick="renameSection(\'' + sec.id + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-del-btn" data-sec="' + sec.id + '" onclick="deleteSection(\'' + sec.id + '\')" title="Delete this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Delete</button><button class="sec-save-btn" data-sec="' + sec.id + '" onclick="saveSectionToArchive(\'' + sec.id + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : '')) + '</div>'
     + '<div class="sec-progress" data-s="' + sec.id + '" style="display:none"><span class="sec-progress-label">0 of 0 tasks completed</span><div class="sec-progress-bar"><div class="sec-progress-fill" style="width:0"></div></div><span class="sec-progress-pct">0%</span></div>'
     // Key Points — NO dismiss button
     + '<div class="card"><div class="card-hdr"><span class="card-ttl">Key Points</span><button class="btn btn-ghost btn-sm" onclick="aR(\'' + sec.id + '-kp\')">+ Row</button></div>'
@@ -4622,7 +5107,7 @@ function buildITSectionHTML(sec) {
   return '<div class="section" id="sec-it">'
     + '<div class="sec-hdr"><div class="sec-left"><div class="sec-badge" style="background:var(--teal-dk)">' + sec.badge + '</div>'
     + '<div><div class="sec-name">Information Technology</div>'
-    + '<div class="prow">Presenter:<input class="p-inp" data-s="it" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + 'it' + '" onclick="regenerateSectionFromSource(\'' + 'it' + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg> Generate</button><button class="sec-clear-btn" data-sec="' + 'it' + '" onclick="clearSection(\'' + 'it' + '\')" title="Clear section data"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"vertical-align:-2px\"><polyline points=\"3 6 5 6 21 6\"/><path d=\"M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6\"/></svg> Clear</button><button class="sec-save-btn" data-sec="' + 'it' + '" onclick="saveSectionToArchive(\'' + 'it' + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : (CURRENT_MODE === 'weekly' ? '<button class="sec-save-btn" data-sec="' + 'it' + '" onclick="saveSectionToArchive(\'' + 'it' + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : '')) + '</div>'
+    + '<div class="prow">Presenter:<input class="p-inp" data-s="it" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + 'it' + '" onclick="regenerateSectionFromSource(\'' + 'it' + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg> Generate</button><button class="sec-clear-btn" data-sec="' + 'it' + '" onclick="clearSection(\'' + 'it' + '\')" title="Clear section data"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"vertical-align:-2px\"><polyline points=\"3 6 5 6 21 6\"/><path d=\"M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6\"/></svg> Clear</button><button class="sec-rename-btn" data-sec="' + 'it' + '" onclick="renameSection(\'' + 'it' + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-del-btn" data-sec="' + 'it' + '" onclick="deleteSection(\'' + 'it' + '\')" title="Delete this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Delete</button><button class="sec-save-btn" data-sec="' + 'it' + '" onclick="saveSectionToArchive(\'' + 'it' + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : (CURRENT_MODE === 'weekly' ? '<button class="sec-rename-btn" data-sec="' + 'it' + '" onclick="renameSection(\'' + 'it' + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-del-btn" data-sec="' + 'it' + '" onclick="deleteSection(\'' + 'it' + '\')" title="Delete this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Delete</button><button class="sec-save-btn" data-sec="' + 'it' + '" onclick="saveSectionToArchive(\'' + 'it' + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : '')) + '</div>'
     + '<div class="card" id="card-it-stats"><div class="card-hdr"><span class="card-ttl">Support Tickets — ' + pl + ' Data</span>'
     + '<button class="card-dismiss" onclick="dismissCard(\'card-it-stats\')" title="Remove">✕</button></div><div class="card-body"><div class="srow">'
     + '<div class="st s0"><div class="stnum"><input id="it-t" placeholder="0"/></div><div class="stlbl">Total Tickets</div></div>'
@@ -4655,7 +5140,7 @@ function buildFacilitySectionHTML(sec) {
   return '<div class="section" id="sec-fac">'
     + '<div class="sec-hdr"><div class="sec-left"><div class="sec-badge" style="background:#1B2631">' + sec.badge + '</div>'
     + '<div><div class="sec-name">Facility</div>'
-    + '<div class="prow">Presenter:<input class="p-inp" data-s="fac" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + 'fac' + '" onclick="regenerateSectionFromSource(\'' + 'fac' + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg> Generate</button><button class="sec-clear-btn" data-sec="' + 'fac' + '" onclick="clearSection(\'' + 'fac' + '\')" title="Clear section data"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"vertical-align:-2px\"><polyline points=\"3 6 5 6 21 6\"/><path d=\"M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6\"/></svg> Clear</button><button class="sec-save-btn" data-sec="' + 'fac' + '" onclick="saveSectionToArchive(\'' + 'fac' + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : (CURRENT_MODE === 'weekly' ? '<button class="sec-save-btn" data-sec="' + 'fac' + '" onclick="saveSectionToArchive(\'' + 'fac' + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : '')) + '</div>'
+    + '<div class="prow">Presenter:<input class="p-inp" data-s="fac" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + 'fac' + '" onclick="regenerateSectionFromSource(\'' + 'fac' + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg> Generate</button><button class="sec-clear-btn" data-sec="' + 'fac' + '" onclick="clearSection(\'' + 'fac' + '\')" title="Clear section data"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"vertical-align:-2px\"><polyline points=\"3 6 5 6 21 6\"/><path d=\"M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6\"/></svg> Clear</button><button class="sec-rename-btn" data-sec="' + 'fac' + '" onclick="renameSection(\'' + 'fac' + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-del-btn" data-sec="' + 'fac' + '" onclick="deleteSection(\'' + 'fac' + '\')" title="Delete this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Delete</button><button class="sec-save-btn" data-sec="' + 'fac' + '" onclick="saveSectionToArchive(\'' + 'fac' + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : (CURRENT_MODE === 'weekly' ? '<button class="sec-rename-btn" data-sec="' + 'fac' + '" onclick="renameSection(\'' + 'fac' + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-del-btn" data-sec="' + 'fac' + '" onclick="deleteSection(\'' + 'fac' + '\')" title="Delete this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Delete</button><button class="sec-save-btn" data-sec="' + 'fac' + '" onclick="saveSectionToArchive(\'' + 'fac' + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : '')) + '</div>'
     + '<div class="card" id="card-fac-tk"><div class="card-hdr"><span class="card-ttl">Facility Tickets</span><button class="btn btn-ghost btn-sm" onclick="aR(\'fac-tk\',0,3)">+ Row</button>'
     + '<button class="card-dismiss" onclick="dismissCard(\'card-fac-tk\')" title="Remove">✕</button></div>'
     + '<div class="card-body"><table class="tbl" id="fac-tk"><thead><tr><th style="width:20%">Category</th><th>Description</th><th style="width:13%" class="th-g">Status</th><th style="width:26px"></th></tr></thead><tbody></tbody></table>'
