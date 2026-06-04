@@ -221,6 +221,24 @@ app.post('/api/archive/:mode/:period', async (req, res) => {
   const period = decodeURIComponent(req.params.period || '');
   if (!VALID_MODE.has(mode)) return res.status(400).json({ error: 'Invalid mode' });
   if (!period) return res.status(400).json({ error: 'Missing period' });
+
+  // RESTORE MODE: { entry: {...full archive doc...} }  → save as-is, preserving
+  // savedAt / lastSavedAt / lastSavedBy. Used by Restore (importArchive).
+  if (req.body && req.body.entry && typeof req.body.entry === 'object') {
+    const e = req.body.entry;
+    const entry = {
+      period: cleanPeriod(e.period || period),
+      sections: e.sections || {},
+      savedAt: e.savedAt || {},
+      lastSavedAt: e.lastSavedAt || new Date().toISOString(),
+      lastSavedBy: sanitize(e.lastSavedBy || 'restore'),
+      mode
+    };
+    if (e._customSections) entry._customSections = e._customSections;
+    await storage.setJSON(ARCHIVE_PATH(mode, period), entry);
+    return res.json({ ok: true, restored: true, period: entry.period, lastSavedAt: entry.lastSavedAt });
+  }
+
   const { data, user } = req.body;
   if (!data) return res.status(400).json({ error: 'Missing data' });
 
