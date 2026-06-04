@@ -887,6 +887,7 @@ async function openDash(mode) {
     if (_savedData) restore(_savedData);
   }
   setTimeout(() => _checkPeriodArchive(), 300);
+  setTimeout(() => { try { _checkEmptyMain(); } catch(e){} }, 600);
 
   // Auto-save DISABLED — user prefers manual Save buttons.
 }
@@ -1806,6 +1807,7 @@ openDash = async function(mode) {
     
     restore(_savedData);
   setTimeout(() => _checkPeriodArchive(), 300);
+  setTimeout(() => { try { _checkEmptyMain(); } catch(e){} }, 600);
   }
 
   // ── Show coverage alert for monthly only ──
@@ -2256,22 +2258,29 @@ async function _checkPeriodArchive() {
   const oldBanner = document.getElementById('period-archive-banner');
   if (oldBanner) oldBanner.remove();
   try {
-    const res = await fetch(API_BASE + '/archive/' + CURRENT_MODE + '/' + encodeURIComponent(slug));
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 6000);
+    const res = await fetch(API_BASE + '/archive/' + CURRENT_MODE + '/' + encodeURIComponent(slug), { signal: ctrl.signal });
+    clearTimeout(timer);
     if (!res.ok) return;
     const entry = await res.json();
     const sections = (entry && entry.sections) ? Object.keys(entry.sections) : [];
     if (!sections.length) return;
+
+    // Auto-hide the already-archived sections (no banner button needed)
+    _hideArchivedSections(sections);
+
+    // Show a small info note above the remaining sections (or above the empty state)
     const main = document.querySelector('.main');
-    if (!main) return;
-    const banner = document.createElement('div');
-    banner.id = 'period-archive-banner';
-    banner.style.cssText = 'background:#FEF3C7;border:1px solid #F59E0B;color:#92400E;padding:12px 16px;border-radius:8px;margin-bottom:16px;font-size:14px;line-height:1.5;';
-    const tags = sections.map(s => '<code style="background:#FDE68A;padding:1px 6px;border-radius:3px;">'+s+'</code>').join(' ');
-    const idList = sections.map(s => "'"+s+"'").join(',');
-    banner.innerHTML = '⚠ <strong>' + labelEl.value + '</strong> already has ' + sections.length +
-      ' section(s) archived: ' + tags +
-      '. <button onclick="_hideArchivedSections([' + idList + '])" style="margin-left:8px;background:#92400E;color:#fff;border:none;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:12px;">Hide already-archived</button>';
-    main.insertBefore(banner, main.firstChild);
+    if (main) {
+      const banner = document.createElement('div');
+      banner.id = 'period-archive-banner';
+      banner.style.cssText = 'background:#F0FDF4;border:1px solid #86EFAC;color:#166534;padding:10px 14px;border-radius:8px;margin-bottom:16px;font-size:12.5px;line-height:1.5;';
+      const tags = sections.map(s => '<code style="background:#DCFCE7;padding:1px 6px;border-radius:3px;color:#14532D;">'+s+'</code>').join(' ');
+      banner.innerHTML = '✦ <strong>' + labelEl.value + '</strong> — already archived: ' + tags +
+        '. They\'re available from <strong>Hub → Archive</strong>.';
+      main.insertBefore(banner, main.firstChild);
+    }
   } catch (e) { /* ignore */ }
 }
 
@@ -2295,21 +2304,26 @@ window._hideArchivedSections = _hideArchivedSections;
 
 // Show a friendly empty-state in the main area when no sections are visible.
 function _checkEmptyMain() {
-  const main = document.querySelector('.main');
+  // Try several selectors; the dashboard layout may use any of them.
+  let main = document.querySelector('main.main')
+          || document.querySelector('.main')
+          || document.querySelector('#layout-area main')
+          || document.querySelector('#layout-area');
   if (!main) return;
-  const visibleSections = main.querySelectorAll('.section');
   // Remove any prior empty-state node
   const prior = main.querySelector('.empty-state');
   if (prior) prior.remove();
+  const visibleSections = main.querySelectorAll('.section');
   if (visibleSections.length === 0) {
     const div = document.createElement('div');
     div.className = 'empty-state';
     div.innerHTML =
       '<div class="empty-state-inner">' +
         '<div class="empty-state-icon">✦</div>' +
-        '<div class="empty-state-title">All sections archived</div>' +
+        '<div class="empty-state-title">Saved to archive</div>' +
         '<div class="empty-state-msg">' +
-          'Saved updates can be reviewed or edited later from the <strong>Hub → Archive</strong> page.' +
+          'Your updates have been saved. You can review or edit them anytime from the ' +
+          '<strong>Hub → Archive</strong> page.' +
         '</div>' +
       '</div>';
     main.appendChild(div);
@@ -2567,123 +2581,154 @@ async function searchArchive() {
 
   results.innerHTML = '<div class="hub-ar-empty">🔍 Searching...</div>';
 
-  // Try server first, then localStorage
-  let historyItems = [];
-
-  // 1. Add embedded 2025 historical data
-  if (typeof HISTORICAL_DATA !== 'undefined') {
-    HISTORICAL_DATA.forEach((entry, idx) => {
-      const modeMatch = !type || type === (entry._mode || 'weekly');
-      if (modeMatch) {
-        historyItems.push({
-          id: 'h_' + idx,
-          version: idx + 1,
-          saved_at: '2025-12-31T00:00:00',
-          saved_by: 'archive',
-          _parsed: entry,
-          _isEmbedded: true,
-          _embIdx: idx,
-        });
-      }
-    });
-  }
-
-  if (_serverAvailable) {
-    // 2a. Legacy /reports/{type}/history (older full-snapshot saves)
+  // Helper: fetch with a 6-second timeout so the UI never hangs.
+  async function fetchWithTimeout(url, ms) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
     try {
-      const res = await fetch(`${API_BASE}/reports/${type}/history?limit=100`);
-      if (res.ok) {
-        const json = await res.json();
-        const serverItems = (json.history || []).map(h => {
-          try {
-            const parsed = JSON.parse(h.data || '{}');
-            return { ...h, _parsed: parsed };
-          } catch(e) { return { ...h, _parsed: {} }; }
-        }).filter(h => h._parsed && h._parsed.week);
-        historyItems = [...historyItems, ...serverItems];
-      }
-    } catch(e) { /* swallow */ }
-
-    // 2b. NEW per-section archive entries (/archive/{type})
-    try {
-      const res2 = await fetch(`${API_BASE}/archive/${type}`);
-      if (res2.ok) {
-        const j2 = await res2.json();
-        const archiveItems = (j2.entries || []).map(e => ({
-          id: 'arch_' + _slugify(e.period || ''),
-          version: '—',
-          saved_at: e.lastSavedAt || new Date().toISOString(),
-          saved_by: e.lastSavedBy || 'team',
-          _parsed: { week: e.period, _mode: type, secs: {} },
-          _isArchiveEntry: true,
-          _archiveSlug: _slugify(e.period || ''),
-          _archiveMode: type,
-          _sectionList: e.sections || []
-        }));
-        historyItems = [...historyItems, ...archiveItems];
-      }
-    } catch(e) { /* swallow */ }
-  }
-
-  // Fallback: get from localStorage
-  if (!historyItems.length) {
-    const localData = LS.get(type);
-    if (localData) {
-      historyItems = [{
-        id: 0,
-        version: 1,
-        saved_at: new Date().toISOString(),
-        saved_by: _userName || 'local',
-        _parsed: localData,
-        _isLocal: true
-      }];
+      const res = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(timer);
+      return res;
+    } catch (e) {
+      clearTimeout(timer);
+      return null;
     }
   }
 
-  // Filter results
-  const filtered = historyItems.filter(h => {
-    const period = h._parsed?.week || '';
-    if (week && !period.toLowerCase().includes(week.toLowerCase())) return false;
-    if (month && !period.toLowerCase().includes(month.toLowerCase())) return false;
-    if (year && !period.includes(String(year))) return false;
-    return true;
-  });
+  let historyItems = [];
 
-  if (!filtered.length) {
-    results.innerHTML = '<div class="hub-ar-empty">No reports found matching your filters</div>';
-    return;
+  try {
+    // 1) Embedded 2025 historical data (always available)
+    if (typeof HISTORICAL_DATA !== 'undefined') {
+      HISTORICAL_DATA.forEach((entry, idx) => {
+        const modeMatch = !type || type === (entry._mode || 'weekly');
+        if (modeMatch) {
+          historyItems.push({
+            id: 'h_' + idx,
+            version: idx + 1,
+            saved_at: '2025-12-31T00:00:00',
+            saved_by: 'archive',
+            _parsed: entry,
+            _isEmbedded: true,
+            _embIdx: idx,
+          });
+        }
+      });
+    }
+
+    // 2) Server fetches (each with timeout & individual catches)
+    if (_serverAvailable) {
+      // 2a) Legacy draft history
+      const res = await fetchWithTimeout(`${API_BASE}/reports/${type}/history?limit=100`, 6000);
+      if (res && res.ok) {
+        try {
+          const json = await res.json();
+          const serverItems = (json.history || []).map(h => {
+            try { return { ...h, _parsed: JSON.parse(h.data || '{}') }; }
+            catch(e) { return { ...h, _parsed: {} }; }
+          }).filter(h => h._parsed && h._parsed.week);
+          historyItems = historyItems.concat(serverItems);
+        } catch (e) { /* skip */ }
+      }
+
+      // 2b) Per-section archive entries
+      const res2 = await fetchWithTimeout(`${API_BASE}/archive/${type}`, 6000);
+      if (res2 && res2.ok) {
+        try {
+          const j2 = await res2.json();
+          const archiveItems = (j2.entries || []).map(e => {
+            const slug = (typeof _slugify === 'function') ? _slugify(e.period || '') : String(e.period || '').toLowerCase().replace(/\s+/g, '-');
+            return {
+              id: 'arch_' + slug,
+              version: '—',
+              saved_at: e.lastSavedAt || new Date().toISOString(),
+              saved_by: e.lastSavedBy || 'team',
+              _parsed: { week: e.period, _mode: type, secs: {} },
+              _isArchiveEntry: true,
+              _archiveSlug: slug,
+              _archiveMode: type,
+              _sectionList: e.sections || []
+            };
+          });
+          historyItems = historyItems.concat(archiveItems);
+        } catch (e) { /* skip */ }
+      }
+    }
+
+    // 3) Fallback to localStorage if no server data was added at all
+    if (historyItems.length === 0) {
+      const localData = LS.get(type);
+      if (localData) {
+        historyItems = [{
+          id: 0, version: 1,
+          saved_at: new Date().toISOString(),
+          saved_by: _userName || 'local',
+          _parsed: localData,
+          _isLocal: true
+        }];
+      }
+    }
+
+    // 4) Filter by user inputs
+    const filtered = historyItems.filter(h => {
+      const period = h._parsed?.week || '';
+      if (week && !period.toLowerCase().includes(week.toLowerCase())) return false;
+      if (month && !period.toLowerCase().includes(month.toLowerCase())) return false;
+      if (year && !period.includes(String(year))) return false;
+      return true;
+    });
+
+    if (!filtered.length) {
+      results.innerHTML = '<div class="hub-ar-empty">No reports found matching your filters</div>';
+      return;
+    }
+
+    // 5) Render — wrap each item in try/catch so one bad item doesn't kill all
+    const typeClass = type === 'weekly' ? 'wk' : type === 'monthly' ? 'mo' : 'qr';
+    const typeLabel = type === 'weekly' ? 'Weekly' : type === 'monthly' ? 'Monthly' : 'Quarterly';
+
+    const cards = filtered.map(h => {
+      try {
+        const period = h._parsed?.week || 'Unnamed report';
+        const d = new Date(h.saved_at || Date.now());
+        const dateStr = isNaN(d) ? '' : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+        const timeStr = isNaN(d) ? '' : d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+        const byStr = h.saved_by || 'unknown';
+
+        let actions;
+        if (h._isArchiveEntry) {
+          const sectionsList = (h._sectionList || []).map(s => '<code>' + escH(String(s)) + '</code>').join(' ');
+          actions = '<div class="hub-ar-sections">' + sectionsList + '</div>'
+            + '<button class="hub-ar-btn" onclick="archiveEntryPreview(\'' + h._archiveSlug + '\',\'' + h._archiveMode + '\')">👁 Preview</button>'
+            + '<button class="hub-ar-btn open" onclick="archiveEntryEdit(\'' + h._archiveSlug + '\',\'' + h._archiveMode + '\')">✏️ Edit</button>';
+        } else if (h._isEmbedded) {
+          actions = '<button class="hub-ar-btn" onclick="previewEmbedded(' + h._embIdx + ')">👁 Preview</button>'
+            + '<button class="hub-ar-btn open" onclick="editEmbedded(' + h._embIdx + ')">✏️ Edit</button>';
+        } else if (h._isLocal) {
+          actions = '<button class="hub-ar-btn open" onclick="archiveOpenLocal(\'' + type + '\')">▶ Open</button>';
+        } else {
+          actions = '<button class="hub-ar-btn" onclick="archivePreview(' + h.id + ',\'' + type + '\')">👁 Preview</button>'
+            + '<button class="hub-ar-btn open" onclick="archiveLoad(' + h.id + ',\'' + type + '\')">✏️ Edit</button>';
+        }
+
+        return '<div class="hub-ar-item">'
+          + '<div class="hub-ar-left">'
+          + '<div class="hub-ar-period"><span class="hub-ar-type ' + typeClass + '">' + typeLabel + '</span>' + escH(period) + '</div>'
+          + '<div class="hub-ar-meta">v' + h.version + ' · ' + byStr + ' · ' + dateStr + ' ' + timeStr + '</div>'
+          + '</div>'
+          + '<div class="hub-ar-actions">' + actions + '</div>'
+          + '</div>';
+      } catch (e) {
+        console.error('Archive item render failed:', e, h);
+        return '';
+      }
+    }).filter(Boolean).join('');
+
+    results.innerHTML = cards || '<div class="hub-ar-empty">No reports found matching your filters</div>';
+  } catch (err) {
+    console.error('searchArchive fatal error:', err);
+    results.innerHTML = '<div class="hub-ar-empty">⚠ Search failed — ' + (err.message || 'unknown error') + '. Try again.</div>';
   }
-
-  // Render results
-  const typeClass = type === 'weekly' ? 'wk' : type === 'monthly' ? 'mo' : 'qr';
-  const typeLabel = type === 'weekly' ? 'Weekly' : type === 'monthly' ? 'Monthly' : 'Quarterly';
-
-  results.innerHTML = filtered.map(h => {
-    const period = h._parsed?.week || 'Unnamed report';
-    const d = new Date(h.saved_at);
-    const dateStr = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-    const timeStr = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-    const byStr = h.saved_by || 'unknown';
-
-    return '<div class="hub-ar-item">'
-      + '<div class="hub-ar-left">'
-      + '<div class="hub-ar-period"><span class="hub-ar-type ' + typeClass + '">' + typeLabel + '</span>' + escH(period) + '</div>'
-      + '<div class="hub-ar-meta">v' + h.version + ' · ' + byStr + ' · ' + dateStr + ' ' + timeStr + '</div>'
-      + '</div>'
-      + '<div class="hub-ar-actions">'
-      + (h._isArchiveEntry
-        ? '<div class="hub-ar-sections">' + (h._sectionList || []).map(s => '<code>'+s+'</code>').join(' ') + '</div>'
-          + '<button class="hub-ar-btn" onclick="archiveEntryPreview(\'' + h._archiveSlug + '\', \'' + h._archiveMode + '\')">👁 Preview</button>'
-          + '<button class="hub-ar-btn open" onclick="archiveEntryEdit(\'' + h._archiveSlug + '\', \'' + h._archiveMode + '\')">✏️ Edit</button>'
-        : h._isEmbedded
-        ? '<button class="hub-ar-btn" onclick="previewEmbedded(' + h._embIdx + ')">👁 Preview</button>'
-          + '<button class="hub-ar-btn open" onclick="editEmbedded(' + h._embIdx + ')">✏️ Edit</button>'
-        : h._isLocal
-        ? '<button class="hub-ar-btn open" onclick="archiveOpenLocal(\'' + type + '\')">▶ Open</button>'
-        : '<button class="hub-ar-btn" onclick="archivePreview(' + h.id + ',\'' + type + '\')">👁 Preview</button>'
-          + '<button class="hub-ar-btn open" onclick="archiveLoad(' + h.id + ',\'' + type + '\')">✏️ Edit</button>')
-      + '</div></div>';
-  }).join('');
 }
 
 async function archivePreview(id, type) {
