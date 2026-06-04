@@ -825,6 +825,45 @@ function escH(s) {
     .replace(/'/g, '&#39;');
 }
 
+// ── LS archive helpers (fallback when running locally / server unreachable) ──
+function _lsArchiveKey(mode) { return 'kabi_archive_' + mode; }
+
+function _lsArchiveLoadAll(mode) {
+  try {
+    const raw = _safeStorage.getItem(_lsArchiveKey(mode));
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) { return {}; }
+}
+
+function _lsArchiveSaveSection(mode, period, secId, secData, user) {
+  try {
+    const all = _lsArchiveLoadAll(mode);
+    const slug = _slugify(period);
+    const entry = all[slug] || { period: period, sections: {}, savedAt: {}, mode: mode };
+    entry.period = period;
+    entry.sections[secId] = secData;
+    const now = new Date().toISOString();
+    entry.savedAt = entry.savedAt || {};
+    entry.savedAt[secId] = now;
+    entry.lastSavedAt = now;
+    entry.lastSavedBy = user || 'local';
+    entry.mode = mode;
+    all[slug] = entry;
+    _safeStorage.setItem(_lsArchiveKey(mode), JSON.stringify(all));
+    return true;
+  } catch (e) {
+    console.error('[LS archive] save failed:', e);
+    return false;
+  }
+}
+
+function _lsArchiveGet(mode, slug) {
+  const all = _lsArchiveLoadAll(mode);
+  return all[slug] || null;
+}
+
+
+
 // ── MODE CONFIGS ──────────────────────────────
 const MODES = {
   weekly: {
@@ -888,6 +927,10 @@ let MODE_CFG = null;
 
 // ── HUB NAVIGATION ──────────────────────────────
 async function goHub() {
+  // Clear archive-edit session flag
+  _isEditingArchive = false;
+  _editingArchiveCtx = null;
+
   /* auto-save removed */
   CURRENT_MODE = null;
   MODE_CFG = null;
@@ -2249,6 +2292,13 @@ window.clearSection = clearSection;
 
 // Save one section to the archive for the current period.
 
+// ── Archive-edit session flag — set while user is editing an archive entry ──
+// so _checkPeriodArchive skips its auto-hide (otherwise the entry's sections
+// would immediately turn back into gray "already in archive" notes the user
+// can't edit).
+let _isEditingArchive = false;
+let _editingArchiveCtx = null; // { slug, mode }
+
 // ── reopenSectionForNewEntry: rebuild a saved section as an empty form ──
 // Triggered by the "+ New" button on the gray .section-saved-note.
 // Lets the user enter a fresh update (potentially for a different period).
@@ -2339,21 +2389,41 @@ async function saveSectionToArchive(secId) {
     }
 
     const slug = _slugify(period);
-    const res = await fetch(API_BASE + '/archive/' + CURRENT_MODE + '/' + encodeURIComponent(slug), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ period: period, sectionId: secId, sectionData: secData, user: _userName || 'anonymous' })
-    });
-    if (!res.ok) {
-      const txt = await res.text();
-      throw new Error('HTTP ' + res.status + ' — ' + txt);
+    let savedToServer = false;
+    let lastErr = null;
+
+    // Try server first if available
+    if (_serverAvailable) {
+      try {
+        const res = await fetch(API_BASE + '/archive/' + CURRENT_MODE + '/' + encodeURIComponent(slug), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ period: period, sectionId: secId, sectionData: secData, user: _userName || 'anonymous' })
+        });
+        if (res.ok) {
+          savedToServer = true;
+        } else {
+          lastErr = 'HTTP ' + res.status;
+        }
+      } catch (e) {
+        lastErr = e.message || 'network';
+        console.warn('[archive] server save failed, falling back to LS:', e);
+      }
     }
 
-    // Look up the section name for the inline note.
+    // Always also save to LS as a local cache / fallback (so it's visible even
+    // if server is unreachable on this device, and so reopening the period
+    // shows the per-section gray note).
+    const lsOk = _lsArchiveSaveSection(CURRENT_MODE, period, secId, secData, _userName);
+    if (!savedToServer && !lsOk) {
+      throw new Error(lastErr || 'Save failed');
+    }
+
+    // Look up section metadata for the note
     const allSecs = (typeof getAllSections === 'function' ? getAllSections() : []) || [];
     const secMeta = allSecs.find(s => s.id === secId) || { name: secId };
 
-    // Replace the section element in-place with a small gray confirmation note.
+    // Replace the section element in-place with a gray confirmation note
     const secEl = document.getElementById('sec-' + secId);
     if (secEl) {
       const note = document.createElement('div');
@@ -2369,11 +2439,12 @@ async function saveSectionToArchive(secId) {
       secEl.replaceWith(note);
     }
 
-    // Remove the sidebar item (uses [data-secid] on .side-item-wrap, not [data-sec]).
+    // Remove the sidebar item using the correct selector
     const sideWrap = document.querySelector('.side-item-wrap[data-secid="' + secId + '"]');
     if (sideWrap) sideWrap.remove();
 
-    _showToast('✦ ' + (secMeta.name || secId) + ' archived for ' + period);
+    const where = savedToServer ? period : period + ' (local)';
+    _showToast('✦ ' + (secMeta.name || secId) + ' archived for ' + where);
     _checkEmptyMain();
   } catch (err) {
     console.error('saveSectionToArchive error', err);
@@ -2393,37 +2464,47 @@ function _slugify(s) {
 }
 
 async function _checkPeriodArchive() {
+  // Skip when the user is explicitly editing an archive entry — otherwise the
+  // sections they just loaded would be immediately hidden as "already archived".
+  if (_isEditingArchive) return;
+
   if (!CURRENT_MODE || !MODE_CFG) return;
   const labelEl = document.getElementById(MODE_CFG.labelId);
   if (!labelEl || !labelEl.value) return;
   const slug = _slugify(labelEl.value);
   const oldBanner = document.getElementById('period-archive-banner');
   if (oldBanner) oldBanner.remove();
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 6000);
-    const res = await fetch(API_BASE + '/archive/' + CURRENT_MODE + '/' + encodeURIComponent(slug), { signal: ctrl.signal });
-    clearTimeout(timer);
-    if (!res.ok) return;
-    const entry = await res.json();
-    const sections = (entry && entry.sections) ? Object.keys(entry.sections) : [];
-    if (!sections.length) return;
 
-    // Auto-hide the already-archived sections (no banner button needed)
-    _hideArchivedSections(sections);
+  let entry = null;
+  if (_serverAvailable) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 6000);
+      const res = await fetch(API_BASE + '/archive/' + CURRENT_MODE + '/' + encodeURIComponent(slug), { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (res.ok) entry = await res.json();
+    } catch (e) { /* try LS next */ }
+  }
+  if (!entry) entry = _lsArchiveGet(CURRENT_MODE, slug);
+  if (!entry) return;
 
-    // Show a small info note above the remaining sections (or above the empty state)
-    const main = document.querySelector('.main');
-    if (main) {
-      const banner = document.createElement('div');
-      banner.id = 'period-archive-banner';
-      banner.style.cssText = 'background:#F0FDF4;border:1px solid #86EFAC;color:#166534;padding:10px 14px;border-radius:8px;margin-bottom:16px;font-size:12.5px;line-height:1.5;';
-      const tags = sections.map(s => '<code style="background:#DCFCE7;padding:1px 6px;border-radius:3px;color:#14532D;">'+s+'</code>').join(' ');
-      banner.innerHTML = '✦ <strong>' + labelEl.value + '</strong> — already archived: ' + tags +
-        '. They\'re available from <strong>Hub → Archive</strong>.';
-      main.insertBefore(banner, main.firstChild);
-    }
-  } catch (e) { /* ignore */ }
+  const sections = (entry && entry.sections) ? Object.keys(entry.sections) : [];
+  if (!sections.length) return;
+
+  // Auto-hide already-archived sections
+  _hideArchivedSections(sections);
+
+  // Small green info banner at top
+  const main = document.querySelector('.main');
+  if (main) {
+    const banner = document.createElement('div');
+    banner.id = 'period-archive-banner';
+    banner.style.cssText = 'background:#F0FDF4;border:1px solid #86EFAC;color:#166534;padding:10px 14px;border-radius:8px;margin-bottom:16px;font-size:12.5px;line-height:1.5;';
+    const tags = sections.map(s => '<code style="background:#DCFCE7;padding:1px 6px;border-radius:3px;color:#14532D;">'+s+'</code>').join(' ');
+    banner.innerHTML = '✦ <strong>' + labelEl.value + '</strong> — already archived: ' + tags +
+      '. They\'re available from <strong>Hub → Archive</strong>.';
+    main.insertBefore(banner, main.firstChild);
+  }
 }
 
 function _hideArchivedSections(secIds) {
@@ -2490,56 +2571,173 @@ window._checkEmptyMain = _checkEmptyMain;
 // Preview an archive entry (per-section) — shows what sections are saved.
 async function archiveEntryPreview(slug, mode) {
   try {
-    const res = await fetch(`${API_BASE}/archive/${mode}/${encodeURIComponent(slug)}`);
-    if (!res.ok) {
-      _showToast('⚠ Could not load this entry', '#EF4444');
+    let entry = null;
+    if (_serverAvailable) {
+      try {
+        const res = await fetch(API_BASE + '/archive/' + mode + '/' + encodeURIComponent(slug));
+        if (res.ok) entry = await res.json();
+      } catch (e) { /* fall back */ }
+    }
+    if (!entry) entry = _lsArchiveGet(mode, slug);
+    if (!entry) {
+      _showToast('⚠ Could not load entry', '#EF4444');
       return;
     }
-    const entry = await res.json();
+    const period = entry.period || slug;
     const sections = entry.sections || {};
-    const lines = Object.keys(sections).map(k => {
-      const s = sections[k] || {};
-      const presenter = s.p ? ' — Presenter: ' + s.p : '';
-      const counts = [
-        (s.kp || []).length ? (s.kp || []).length + ' KP' : '',
-        (s.ac || []).length ? (s.ac || []).length + ' AC' : '',
-        (s.ch || []).length ? (s.ch || []).length + ' CH' : '',
-        (s.nw || []).length ? (s.nw || []).length + ' NW' : ''
-      ].filter(Boolean).join(' · ');
-      return '<div style="padding:10px 14px;border-left:3px solid #62C6D3;background:#F4F8FB;margin:6px 0;border-radius:4px"><strong>' + k + '</strong>' + presenter + '<div style="font-size:12px;color:#6B7280;margin-top:4px">' + (counts || 'empty') + '</div></div>';
+    const lastBy = entry.lastSavedBy || 'unknown';
+    const lastAt = entry.lastSavedAt ? new Date(entry.lastSavedAt).toLocaleString('en-GB') : '—';
+
+    // Build the section catalogue to get display names
+    const allSecs = (typeof getAllSections === 'function' ? getAllSections() : []) || [];
+    const secMap = {};
+    allSecs.forEach(s => secMap[s.id] = s);
+
+    // Render each section's content
+    const renderList = (arr) => {
+      if (!arr || !arr.length) return '<em style="color:#9CA3AF;font-size:12px">none</em>';
+      return '<ul style="margin:4px 0 0 0;padding-left:18px;font-size:12.5px;line-height:1.55;color:#374151">' +
+        arr.map(item => {
+          if (Array.isArray(item)) {
+            return '<li>' + item.map(x => escH(String(x || ''))).filter(Boolean).join(' — ') + '</li>';
+          }
+          return '<li>' + escH(String(item || '')) + '</li>';
+        }).filter(li => li.indexOf('<li></li>') === -1).join('') +
+      '</ul>';
+    };
+
+    const secCards = Object.entries(sections).map(([secId, sd]) => {
+      const meta = secMap[secId] || { name: secId };
+      sd = sd || {};
+      const presenter = sd.p || '—';
+      // The 4 standard sub-lists (varies per section type)
+      let body = '';
+      if (sd.kp !== undefined) {
+        body += '<div style="margin-top:8px"><div style="font-weight:600;font-size:11.5px;color:#6B7280;text-transform:uppercase;letter-spacing:.04em">KPIs</div>' + renderList(sd.kp) + '</div>';
+      }
+      if (sd.ac !== undefined) {
+        body += '<div style="margin-top:8px"><div style="font-weight:600;font-size:11.5px;color:#6B7280;text-transform:uppercase;letter-spacing:.04em">Activities</div>' + renderList(sd.ac) + '</div>';
+      }
+      if (sd.ch !== undefined) {
+        body += '<div style="margin-top:8px"><div style="font-weight:600;font-size:11.5px;color:#6B7280;text-transform:uppercase;letter-spacing:.04em">Challenges</div>' + renderList(sd.ch) + '</div>';
+      }
+      if (sd.nw !== undefined) {
+        body += '<div style="margin-top:8px"><div style="font-weight:600;font-size:11.5px;color:#6B7280;text-transform:uppercase;letter-spacing:.04em">Next Period</div>' + renderList(sd.nw) + '</div>';
+      }
+      // IT-specific: tickets
+      if (sd.tk !== undefined && Array.isArray(sd.tk) && sd.tk.length) {
+        body += '<div style="margin-top:8px"><div style="font-weight:600;font-size:11.5px;color:#6B7280;text-transform:uppercase;letter-spacing:.04em">Tickets (' + (sd.t || sd.tk.length) + ')</div>' + renderList(sd.tk) + '</div>';
+      }
+      // Facility-specific: purchases / FTE
+      if (sd.fte !== undefined && Array.isArray(sd.fte) && sd.fte.length) {
+        body += '<div style="margin-top:8px"><div style="font-weight:600;font-size:11.5px;color:#6B7280;text-transform:uppercase;letter-spacing:.04em">FTE</div>' + renderList(sd.fte) + '</div>';
+      }
+      if (sd.nonfte !== undefined && Array.isArray(sd.nonfte) && sd.nonfte.length) {
+        body += '<div style="margin-top:8px"><div style="font-weight:600;font-size:11.5px;color:#6B7280;text-transform:uppercase;letter-spacing:.04em">Non-FTE</div>' + renderList(sd.nonfte) + '</div>';
+      }
+
+      return '<div style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;padding:14px;margin-bottom:10px;border-left:3px solid var(--green-dk,#10B981);">' +
+        '<div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:8px">' +
+          '<div style="font-weight:600;font-size:14px;color:#111827">' + escH(meta.name) + '</div>' +
+          '<div style="font-size:12px;color:#6B7280">Presenter: <strong>' + escH(presenter) + '</strong></div>' +
+        '</div>' +
+        body +
+      '</div>';
     }).join('');
-    const html = '<h3 style="margin:0 0 12px">' + (entry.period || slug) + '</h3>' +
-                 '<div style="font-size:12px;color:#6B7280;margin-bottom:14px">Last saved: ' + (entry.lastSavedAt ? new Date(entry.lastSavedAt).toLocaleString() : '—') + '</div>' +
-                 (lines || '<em>No sections archived yet.</em>');
-    _openSimpleModal('Archive Entry — ' + (entry.period || slug), html);
-  } catch (e) {
-    console.error(e);
-    _showToast('⚠ Preview failed', '#EF4444');
+
+    const body =
+      '<div style="margin-bottom:14px;color:#6B7280;font-size:13px">' +
+        '<strong>' + escH(period) + '</strong>' +
+        (entry.mode ? ' · <em>' + escH(entry.mode) + '</em>' : '') +
+        '<br>Last saved by <strong>' + escH(lastBy) + '</strong> on ' + escH(lastAt) +
+      '</div>' +
+      '<div style="margin-bottom:8px;font-weight:600;color:#374151;font-size:13px">Sections saved (' + Object.keys(sections).length + ')</div>' +
+      (secCards || '<em style="color:#9CA3AF">No sections recorded</em>') +
+      '<div style="margin-top:14px;padding-top:14px;border-top:1px solid #E5E7EB;text-align:right">' +
+        '<button onclick="document.getElementById(\'simple-modal\').remove(); archiveEntryEdit(\'' + slug + '\',\'' + mode + '\');" ' +
+        'style="background:linear-gradient(135deg, #10B981, #059669);color:#fff;border:none;padding:9px 18px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;">' +
+        '✏️ Edit this entry</button>' +
+      '</div>';
+
+    _openSimpleModal('Archive Entry — ' + period, body);
+  } catch (err) {
+    console.error('archiveEntryPreview error', err);
+    _showToast('⚠ Preview failed — ' + (err.message || 'see console'), '#EF4444');
   }
 }
 
 // Edit an archive entry — load it into the dashboard editor.
 async function archiveEntryEdit(slug, mode) {
   try {
-    const res = await fetch(`${API_BASE}/archive/${mode}/${encodeURIComponent(slug)}`);
-    if (!res.ok) {
-      _showToast('⚠ Could not load this entry', '#EF4444');
+    let entry = null;
+    if (_serverAvailable) {
+      try {
+        const res = await fetch(API_BASE + '/archive/' + mode + '/' + encodeURIComponent(slug));
+        if (res.ok) entry = await res.json();
+      } catch (e) { /* fall back */ }
+    }
+    if (!entry) entry = _lsArchiveGet(mode, slug);
+    if (!entry) {
+      _showToast('⚠ Could not load entry', '#EF4444');
       return;
     }
-    const entry = await res.json();
-    // Build a _pendingEditData object the dashboard understands
+
+    // Mark this session as an archive-edit so _checkPeriodArchive skips auto-hide
+    _isEditingArchive = true;
+    _editingArchiveCtx = { slug: slug, mode: mode };
+
     _pendingEditData = {
       week: entry.period,
       _mode: mode,
       secs: entry.sections || {}
     };
+
     if (typeof closeHistory === 'function') closeHistory();
     await openDash(mode);
-    _showToast('✦ Loaded ' + (entry.period || slug) + ' for editing');
-  } catch (e) {
-    console.error(e);
-    _showToast('⚠ Edit-load failed', '#EF4444');
+
+    // Set the period label so the dashboard shows the correct period
+    setTimeout(() => {
+      try {
+        const labelEl = document.getElementById(MODE_CFG.labelId);
+        if (labelEl) {
+          labelEl.value = entry.period;
+          // DO NOT dispatch 'change' here — that would trigger _checkPeriodArchive
+          // which we want to skip while in archive-edit mode.
+        }
+      } catch (e) {}
+
+      // Show an edit-mode banner so the user knows they're editing an archive entry
+      const main = document.querySelector('main.main') || document.querySelector('.main');
+      if (main) {
+        // Remove the auto-hide banner if it slipped through
+        const oldB = document.getElementById('period-archive-banner');
+        if (oldB) oldB.remove();
+        const oldE = document.getElementById('archive-edit-banner');
+        if (oldE) oldE.remove();
+        const banner = document.createElement('div');
+        banner.id = 'archive-edit-banner';
+        banner.style.cssText = 'background:#FEF3C7;border:1px solid #FCD34D;color:#92400E;padding:12px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;line-height:1.55;display:flex;align-items:center;gap:12px;';
+        banner.innerHTML =
+          '<div style="font-size:18px">✏️</div>' +
+          '<div style="flex:1">' +
+            '<div style="font-weight:600;margin-bottom:2px">Editing archive entry — ' + escH(entry.period || '') + '</div>' +
+            '<div style="font-size:12px;opacity:.9">Use each section\'s <strong>Save</strong> button to update its archived data. Click <strong>Exit edit mode</strong> when done.</div>' +
+          '</div>' +
+          '<button onclick="_exitArchiveEdit()" style="background:#92400E;color:#fff;border:none;padding:7px 14px;border-radius:5px;cursor:pointer;font-size:12px;font-weight:500;flex-shrink:0;">Exit edit mode</button>';
+        main.insertBefore(banner, main.firstChild);
+      }
+    }, 200);
+  } catch (err) {
+    console.error('archiveEntryEdit error', err);
+    _showToast('⚠ Edit failed — ' + (err.message || 'see console'), '#EF4444');
   }
+}
+
+// Exit archive-edit mode and return to the Hub.
+function _exitArchiveEdit() {
+  _isEditingArchive = false;
+  _editingArchiveCtx = null;
+  if (typeof goHub === 'function') goHub();
 }
 
 // Minimal modal for archive preview (uses existing toast/dialog styles).
@@ -2810,6 +3008,28 @@ async function searchArchive() {
         } catch (e) { /* skip */ }
       }
     }
+
+    // 2c) LS archive entries (locally saved per-section data)
+    try {
+      const lsAll = _lsArchiveLoadAll(type);
+      const seenSlugs = new Set(historyItems.filter(h => h._isArchiveEntry).map(h => h._archiveSlug));
+      const lsItems = Object.entries(lsAll || {}).map(([slug, entry]) => {
+        if (seenSlugs.has(slug)) return null; // server already has it
+        return {
+          id: 'ls_' + slug,
+          version: '—',
+          saved_at: entry.lastSavedAt || new Date().toISOString(),
+          saved_by: entry.lastSavedBy || 'local',
+          _parsed: { week: entry.period, _mode: type, secs: {} },
+          _isArchiveEntry: true,
+          _isLSArchive: true,
+          _archiveSlug: slug,
+          _archiveMode: type,
+          _sectionList: Object.keys(entry.sections || {})
+        };
+      }).filter(Boolean);
+      historyItems = historyItems.concat(lsItems);
+    } catch(e) { /* skip */ }
 
     // 3) Fallback to localStorage if no server data was added at all
     if (historyItems.length === 0) {
