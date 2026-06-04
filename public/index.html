@@ -259,6 +259,20 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
   font-size:12px;color:#6B7280;line-height:1.5;
 }
 .section-saved-note .ssn-msg strong{color:#374151;font-weight:600}
+.section-saved-note .ssn-new-btn{
+  flex-shrink:0;align-self:center;
+  padding:7px 14px;font-size:12px;font-weight:500;
+  background:#FFFFFF;color:#374151;
+  border:1px solid #D1D5DB;border-radius:6px;
+  cursor:pointer;transition:background .15s, border-color .15s;
+}
+.section-saved-note .ssn-new-btn:hover{
+  background:#F3F4F6;border-color:#9CA3AF;color:#111827;
+}
+.section-saved-note .ssn-new-btn:active{
+  background:#E5E7EB;
+}
+
 
 /* Empty state shown when all sections are archived */
 .empty-state{
@@ -801,6 +815,16 @@ body.dash-active #dash-root {display:flex;flex-direction:column;min-height:100vh
 <div class="ov" id="ov"><div class="modal"><h2>Export to PowerPoint</h2><p>All dashboard content will be packaged into a branded KABi <strong>.pptx</strong> file and downloaded automatically.</p><div class="mbtns"><button class="btn btn-outline" onclick="hideOv()">Cancel</button><button class="btn btn-navy" id="exportBtn" onclick="this.textContent='⏳ Building…';this.disabled=true;runExport().finally(()=>{this.textContent='⬇ Download .pptx';this.disabled=false;})">⬇ Download .pptx</button></div></div></div>
 
 <script>
+// ── escH: HTML escape helper (defined here so every later function sees it) ──
+function escH(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // ── MODE CONFIGS ──────────────────────────────
 const MODES = {
   weekly: {
@@ -2224,6 +2248,79 @@ async function clearSection(secId) {
 window.clearSection = clearSection;
 
 // Save one section to the archive for the current period.
+
+// ── reopenSectionForNewEntry: rebuild a saved section as an empty form ──
+// Triggered by the "+ New" button on the gray .section-saved-note.
+// Lets the user enter a fresh update (potentially for a different period).
+function reopenSectionForNewEntry(secId) {
+  try {
+    const note = document.querySelector('.section-saved-note[data-secid="' + secId + '"]');
+    if (!note) {
+      _showToast('⚠ Saved note not found', '#EF4444');
+      return;
+    }
+
+    const allSecs = (typeof getAllSections === 'function' ? getAllSections() : []) || [];
+    const secMeta = allSecs.find(s => s.id === secId);
+    if (!secMeta) {
+      _showToast('⚠ Section metadata missing', '#EF4444');
+      return;
+    }
+
+    // Build fresh empty section HTML using the appropriate builder
+    let newHTML;
+    if (secId === 'it')       newHTML = buildITSectionHTML(secMeta);
+    else if (secId === 'fac') newHTML = buildFacilitySectionHTML(secMeta);
+    else                      newHTML = buildStandardSectionHTML(secMeta);
+
+    const wrap = document.createElement('div');
+    wrap.innerHTML = newHTML.trim();
+    const newEl = wrap.firstElementChild;
+    if (!newEl) {
+      _showToast('⚠ Could not build section', '#EF4444');
+      return;
+    }
+
+    // Swap the gray note out for the empty section in-place
+    note.replaceWith(newEl);
+
+    // Re-add the sidebar item if it's missing. Full rebuild keeps order.
+    if (!document.querySelector('.side-item-wrap[data-secid="' + secId + '"]')) {
+      const sortable = document.getElementById('side-sortable');
+      if (sortable && typeof buildSidebarHTML === 'function') {
+        const sideHTML = buildSidebarHTML();
+        const tmpDiv = document.createElement('div');
+        tmpDiv.innerHTML = sideHTML;
+        const newSortable = tmpDiv.querySelector('#side-sortable');
+        if (newSortable) sortable.innerHTML = newSortable.innerHTML;
+      }
+    }
+
+    // Hide the green "already archived" banner if it's now stale
+    const banner = document.getElementById('period-archive-banner');
+    if (banner && banner.textContent.indexOf(secMeta.name) > -1) {
+      // banner text may need refresh; simplest: leave it alone
+    }
+
+    // Remove the empty-state gray note if it's present (main no longer empty)
+    const mainEl = document.querySelector('main.main') || document.querySelector('.main');
+    if (mainEl) {
+      const empty = mainEl.querySelector('.empty-state');
+      if (empty) empty.remove();
+    }
+
+    // Smooth scroll the new (empty) section into view
+    setTimeout(() => {
+      try { newEl.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+    }, 50);
+
+    _showToast('✦ ' + secMeta.name + ' reopened — change period and fill in new data', '#10B981');
+  } catch (err) {
+    console.error('reopenSectionForNewEntry error:', err);
+    _showToast('⚠ Could not reopen section — ' + (err.message || 'see console'), '#EF4444');
+  }
+}
+
 async function saveSectionToArchive(secId) {
   if (!CURRENT_MODE || !MODE_CFG) return;
   const btn = document.querySelector('.sec-save-btn[data-sec="' + secId + '"]');
@@ -2267,7 +2364,8 @@ async function saveSectionToArchive(secId) {
         '<div class="ssn-body">' +
           '<div class="ssn-title">' + escH(secMeta.name) + ' — saved to archive</div>' +
           '<div class="ssn-msg">Available for review or edit from the <strong>Hub → Archive</strong> page.</div>' +
-        '</div>';
+        '</div>' +
+        '<button class="ssn-new-btn" onclick="reopenSectionForNewEntry(\'' + secId + '\')" title="Start a new update for this section">+ New</button>';
       secEl.replaceWith(note);
     }
 
@@ -2342,7 +2440,8 @@ function _hideArchivedSections(secIds) {
         '<div class="ssn-body">' +
           '<div class="ssn-title">' + escH(meta.name) + ' — already in archive</div>' +
           '<div class="ssn-msg">Available for review or edit from the <strong>Hub → Archive</strong> page.</div>' +
-        '</div>';
+        '</div>' +
+        '<button class="ssn-new-btn" onclick="reopenSectionForNewEntry(\'' + sid + '\')" title="Start a new update for this section">+ New</button>';
       secEl.replaceWith(note);
     }
     // Sidebar items use [data-secid] on .side-item-wrap, NOT [data-sec].
