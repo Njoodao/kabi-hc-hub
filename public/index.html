@@ -237,6 +237,30 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
 .sec-clear-btn:hover{background:#FEE2E2;border-color:#B91C1C}
 .sec-clear-btn .ico{font-size:14px;line-height:1}
 
+/* Empty state shown when all sections are archived */
+.empty-state{
+  display:flex;align-items:center;justify-content:center;
+  min-height:60vh;padding:40px 20px;
+}
+.empty-state-inner{
+  text-align:center;max-width:480px;
+  color:#6B7280;
+}
+.empty-state-icon{
+  font-size:42px;margin-bottom:16px;
+  color:#9CA3AF;opacity:.7;
+}
+.empty-state-title{
+  font-size:16px;font-weight:600;margin-bottom:8px;
+  color:#374151;
+}
+.empty-state-msg{
+  font-size:13px;line-height:1.6;
+  color:#6B7280;
+}
+.empty-state-msg strong{color:#374151;font-weight:600}
+
+
 /* Ensure the SVG icons inherit font color and align nicely */
 .sec-regen-btn svg, .sec-save-btn svg, .sec-clear-btn svg {
   flex-shrink: 0;
@@ -251,7 +275,11 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
 
 
 /* SECTION HEADER */
-.sec-hdr{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px}
+.sec-hdr{display:flex;align-items:center;gap:8px;margin-bottom:20px;flex-wrap:wrap}
+.sec-hdr .sec-left{flex:1;min-width:200px}
+.sec-hdr > button{flex-shrink:0;margin-left:0 !important}
+/* Tighter, icon-leaning buttons */
+.sec-regen-btn, .sec-save-btn, .sec-clear-btn{padding:7px 10px;font-size:11.5px;letter-spacing:.02em}
 .sec-left{display:flex;align-items:center;gap:12px}
 .sec-badge{width:36px;height:36px;border-radius:var(--rs);display:flex;align-items:center;justify-content:center;
   font-size:13px;font-weight:800;color:#fff;background:var(--navy-lt);flex-shrink:0;}
@@ -737,15 +765,7 @@ body.dash-active #dash-root {display:flex;flex-direction:column;min-height:100vh
     </div>
     <div class="bar-right" id="bar-period"><!-- period input injected by JS --></div>
     <div class="bar-right">
-      <div class="mode-pill">
-        <button class="mode-btn wk-btn" onclick="switchMode('weekly')">Weekly</button>
-        <div style="width:1px;height:16px;background:rgba(255,255,255,.1)"></div>
-        <button class="mode-btn mo-btn" onclick="switchMode('monthly')">Monthly</button>
-        <div style="width:1px;height:16px;background:rgba(255,255,255,.1)"></div>
-        <button class="mode-btn qr-btn" onclick="switchMode('quarterly')">Quarterly</button>
-        <div style="width:1px;height:16px;background:rgba(255,255,255,.1)"></div>
-        <span style="font-size:10px;color:rgba(98,198,211,.7);letter-spacing:.04em" title="Weekly saves auto-sync to Monthly; Monthly saves auto-sync to Quarterly">Weekly → Monthly → Quarterly ⟳</span>
-      </div>
+      <!-- mode toggle removed; mode comes from Hub -->
       <button class="btn btn-ghost" onclick="openPresentation()" title="Present current report">▶ Present</button>
       <button class="btn btn-ghost" onclick="showOv()">⬇ Export PPT</button>
       
@@ -2210,6 +2230,7 @@ async function saveSectionToArchive(secId) {
     if (secEl) secEl.remove();
     const sideItem = document.querySelector('.side-item[data-sec="' + secId + '"]');
     if (sideItem) sideItem.remove();
+    _checkEmptyMain();
   } catch (err) {
     console.error('saveSectionToArchive error', err);
     _showToast('⚠ Could not archive section — see console', '#EF4444');
@@ -2263,6 +2284,7 @@ function _hideArchivedSections(secIds) {
   }
   const banner = document.getElementById('period-archive-banner');
   if (banner) banner.remove();
+  _checkEmptyMain();
   _showToast('✦ Already-archived sections hidden');
 }
 
@@ -2270,6 +2292,107 @@ function _hideArchivedSections(secIds) {
 window.regenerateSectionFromSource = regenerateSectionFromSource;
 window.saveSectionToArchive = saveSectionToArchive;
 window._hideArchivedSections = _hideArchivedSections;
+
+// Show a friendly empty-state in the main area when no sections are visible.
+function _checkEmptyMain() {
+  const main = document.querySelector('.main');
+  if (!main) return;
+  const visibleSections = main.querySelectorAll('.section');
+  // Remove any prior empty-state node
+  const prior = main.querySelector('.empty-state');
+  if (prior) prior.remove();
+  if (visibleSections.length === 0) {
+    const div = document.createElement('div');
+    div.className = 'empty-state';
+    div.innerHTML =
+      '<div class="empty-state-inner">' +
+        '<div class="empty-state-icon">✦</div>' +
+        '<div class="empty-state-title">All sections archived</div>' +
+        '<div class="empty-state-msg">' +
+          'Saved updates can be reviewed or edited later from the <strong>Hub → Archive</strong> page.' +
+        '</div>' +
+      '</div>';
+    main.appendChild(div);
+  }
+}
+window._checkEmptyMain = _checkEmptyMain;
+
+// Preview an archive entry (per-section) — shows what sections are saved.
+async function archiveEntryPreview(slug, mode) {
+  try {
+    const res = await fetch(`${API_BASE}/archive/${mode}/${encodeURIComponent(slug)}`);
+    if (!res.ok) {
+      _showToast('⚠ Could not load this entry', '#EF4444');
+      return;
+    }
+    const entry = await res.json();
+    const sections = entry.sections || {};
+    const lines = Object.keys(sections).map(k => {
+      const s = sections[k] || {};
+      const presenter = s.p ? ' — Presenter: ' + s.p : '';
+      const counts = [
+        (s.kp || []).length ? (s.kp || []).length + ' KP' : '',
+        (s.ac || []).length ? (s.ac || []).length + ' AC' : '',
+        (s.ch || []).length ? (s.ch || []).length + ' CH' : '',
+        (s.nw || []).length ? (s.nw || []).length + ' NW' : ''
+      ].filter(Boolean).join(' · ');
+      return '<div style="padding:10px 14px;border-left:3px solid #62C6D3;background:#F4F8FB;margin:6px 0;border-radius:4px"><strong>' + k + '</strong>' + presenter + '<div style="font-size:12px;color:#6B7280;margin-top:4px">' + (counts || 'empty') + '</div></div>';
+    }).join('');
+    const html = '<h3 style="margin:0 0 12px">' + (entry.period || slug) + '</h3>' +
+                 '<div style="font-size:12px;color:#6B7280;margin-bottom:14px">Last saved: ' + (entry.lastSavedAt ? new Date(entry.lastSavedAt).toLocaleString() : '—') + '</div>' +
+                 (lines || '<em>No sections archived yet.</em>');
+    _openSimpleModal('Archive Entry — ' + (entry.period || slug), html);
+  } catch (e) {
+    console.error(e);
+    _showToast('⚠ Preview failed', '#EF4444');
+  }
+}
+
+// Edit an archive entry — load it into the dashboard editor.
+async function archiveEntryEdit(slug, mode) {
+  try {
+    const res = await fetch(`${API_BASE}/archive/${mode}/${encodeURIComponent(slug)}`);
+    if (!res.ok) {
+      _showToast('⚠ Could not load this entry', '#EF4444');
+      return;
+    }
+    const entry = await res.json();
+    // Build a _pendingEditData object the dashboard understands
+    _pendingEditData = {
+      week: entry.period,
+      _mode: mode,
+      secs: entry.sections || {}
+    };
+    if (typeof closeHistory === 'function') closeHistory();
+    await openDash(mode);
+    _showToast('✦ Loaded ' + (entry.period || slug) + ' for editing');
+  } catch (e) {
+    console.error(e);
+    _showToast('⚠ Edit-load failed', '#EF4444');
+  }
+}
+
+// Minimal modal for archive preview (uses existing toast/dialog styles).
+function _openSimpleModal(title, htmlBody) {
+  const existing = document.getElementById('simple-modal');
+  if (existing) existing.remove();
+  const wrap = document.createElement('div');
+  wrap.id = 'simple-modal';
+  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px';
+  wrap.innerHTML =
+    '<div style="background:#fff;border-radius:12px;max-width:560px;width:100%;max-height:80vh;overflow:auto;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.3)">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">' +
+        '<h3 style="margin:0;font-size:15px">' + escH(title) + '</h3>' +
+        '<button onclick="document.getElementById(\'simple-modal\').remove()" style="background:transparent;border:none;font-size:20px;cursor:pointer;color:#6B7280">×</button>' +
+      '</div>' +
+      '<div>' + htmlBody + '</div>' +
+    '</div>';
+  wrap.addEventListener('click', (e) => { if (e.target === wrap) wrap.remove(); });
+  document.body.appendChild(wrap);
+}
+
+window.archiveEntryPreview = archiveEntryPreview;
+window.archiveEntryEdit = archiveEntryEdit;
 window._checkPeriodArchive = _checkPeriodArchive;
 
 // Auto-fill Monthly from all Weekly entries of same month
@@ -2466,13 +2589,11 @@ async function searchArchive() {
   }
 
   if (_serverAvailable) {
+    // 2a. Legacy /reports/{type}/history (older full-snapshot saves)
     try {
       const res = await fetch(`${API_BASE}/reports/${type}/history?limit=100`);
       if (res.ok) {
         const json = await res.json();
-        // FIX: APPEND server entries to historyItems (don't overwrite),
-        // and skip server entries with no usable data (the /history endpoint
-        // only returns metadata, so most entries here have empty _parsed).
         const serverItems = (json.history || []).map(h => {
           try {
             const parsed = JSON.parse(h.data || '{}');
@@ -2481,7 +2602,27 @@ async function searchArchive() {
         }).filter(h => h._parsed && h._parsed.week);
         historyItems = [...historyItems, ...serverItems];
       }
-    } catch(e) { /* fallback below */ }
+    } catch(e) { /* swallow */ }
+
+    // 2b. NEW per-section archive entries (/archive/{type})
+    try {
+      const res2 = await fetch(`${API_BASE}/archive/${type}`);
+      if (res2.ok) {
+        const j2 = await res2.json();
+        const archiveItems = (j2.entries || []).map(e => ({
+          id: 'arch_' + _slugify(e.period || ''),
+          version: '—',
+          saved_at: e.lastSavedAt || new Date().toISOString(),
+          saved_by: e.lastSavedBy || 'team',
+          _parsed: { week: e.period, _mode: type, secs: {} },
+          _isArchiveEntry: true,
+          _archiveSlug: _slugify(e.period || ''),
+          _archiveMode: type,
+          _sectionList: e.sections || []
+        }));
+        historyItems = [...historyItems, ...archiveItems];
+      }
+    } catch(e) { /* swallow */ }
   }
 
   // Fallback: get from localStorage
@@ -2530,27 +2671,17 @@ async function searchArchive() {
       + '<div class="hub-ar-meta">v' + h.version + ' · ' + byStr + ' · ' + dateStr + ' ' + timeStr + '</div>'
       + '</div>'
       + '<div class="hub-ar-actions">'
-      + (h._isEmbedded
+      + (h._isArchiveEntry
+        ? '<div class="hub-ar-sections">' + (h._sectionList || []).map(s => '<code>'+s+'</code>').join(' ') + '</div>'
+          + '<button class="hub-ar-btn" onclick="archiveEntryPreview(\'' + h._archiveSlug + '\', \'' + h._archiveMode + '\')">👁 Preview</button>'
+          + '<button class="hub-ar-btn open" onclick="archiveEntryEdit(\'' + h._archiveSlug + '\', \'' + h._archiveMode + '\')">✏️ Edit</button>'
+        : h._isEmbedded
         ? '<button class="hub-ar-btn" onclick="previewEmbedded(' + h._embIdx + ')">👁 Preview</button>'
           + '<button class="hub-ar-btn open" onclick="editEmbedded(' + h._embIdx + ')">✏️ Edit</button>'
         : h._isLocal
         ? '<button class="hub-ar-btn open" onclick="archiveOpenLocal(\'' + type + '\')">▶ Open</button>'
         : '<button class="hub-ar-btn" onclick="archivePreview(' + h.id + ',\'' + type + '\')">👁 Preview</button>'
-          + '<button class="hub-ar-btn open" onclick="archiveLoad(' + h.id + ',\'' + type + '\')">✏️ Edit</button>')
-      + '</div></div>';
-  }).join('');
-}
-
-function escH(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-
-async function archivePreview(id, type) {
-  try {
-    const res = await fetch(`${API_BASE}/reports/${type}/history/${id}`);
-    const json = await res.json();
-    if (json.data) {
-      CURRENT_MODE = type;
-      MODE_CFG = MODES[type];
-      showPresentation(json.data, 'Archive v' + json.version + ' — ' + (json.data.week || ''));
+          + '<button class="hub-ar-btn open" onclick="archiveLoad(' + h.id + ',\'' + type + '\')">✏️ Edit</button>');
     }
   } catch(e) { alert('Failed to load this report'); }
 }
