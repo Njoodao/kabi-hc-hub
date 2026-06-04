@@ -344,4 +344,142 @@ app.post('/api/import', async (req, res) => {
   res.json({ ok: true, imported });
 });
 
+
+// ═════════════════════════════════════════════════════════════════
+// EXTERNAL READ-ONLY API  /api/v1/*
+// Requires KABI_READ_TOKEN env var. Accepts the token via
+//   • Authorization: Bearer <token>
+//   • or  ?token=<token>  (URL-friendly for simple integrations)
+// All endpoints are GET-only — no writes, no deletes.
+// ═════════════════════════════════════════════════════════════════
+const READ_TOKEN = process.env.KABI_READ_TOKEN || '';
+
+function checkReadToken(req, res, next) {
+  if (!READ_TOKEN) {
+    return res.status(503).json({
+      error: 'External API not configured',
+      hint: 'Set KABI_READ_TOKEN env var in Vercel project settings to enable'
+    });
+  }
+  const auth = req.headers.authorization || '';
+  const bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  const qtoken = (req.query && req.query.token) ? String(req.query.token).trim() : '';
+  const given = bearer || qtoken;
+  if (given !== READ_TOKEN) {
+    return res.status(401).json({ error: 'Invalid or missing token' });
+  }
+  next();
+}
+
+// ── Health ──
+app.get('/api/v1/health', checkReadToken, (_req, res) => {
+  res.json({
+    status: 'ok',
+    api: 'kabi-hc-hub-readonly',
+    version: 1,
+    storage: storage.backend,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// ── Section metadata (so external systems know the schema) ──
+app.get('/api/v1/sections', checkReadToken, (_req, res) => {
+  res.json({
+    builtin: [
+      { id: 'ops',   name: 'Operations',              builtin: true },
+      { id: 'hcdev', name: 'HC Development & PM',     builtin: true },
+      { id: 'ic',    name: 'Internal Communication',  builtin: true },
+      { id: 'ta',    name: 'Talent Acquisition',      builtin: true },
+      { id: 'it',    name: 'Information Technology',  builtin: true },
+      { id: 'fac',   name: 'Facility',                builtin: true }
+    ],
+    sectionDataShape: {
+      p:  'string — presenter name',
+      kp: 'array of [task, status, details] — Key Points',
+      ac: 'array of strings — Activities / Accomplishments',
+      ch: 'array of [challenge, action] — Challenges',
+      nw: 'array of strings — Next-period Focus',
+      tk: 'array of tickets (IT/Facility only)',
+      pr: 'array of [item, qty/price] (Facility only)',
+      pt: 'string — total (Facility only)',
+      t:  'string — ticket count (IT only)'
+    }
+  });
+});
+
+// ── List entries for a mode ──
+app.get('/api/v1/archive/:mode', checkReadToken, async (req, res) => {
+  const { mode } = req.params;
+  if (!VALID_MODE.has(mode)) return res.status(400).json({ error: 'Invalid mode (use weekly|monthly|quarterly)' });
+  try {
+    const blobs = await storage.listPrefix(ARCHIVE_PREFIX(mode));
+    const items = blobs.map(b => ({
+      slug: b.pathname.replace(ARCHIVE_PREFIX(mode), '').replace(/\.json$/, ''),
+      period: b.data?.period,
+      mode: b.data?.mode || mode,
+      lastSavedAt: b.data?.lastSavedAt,
+      lastSavedBy: b.data?.lastSavedBy,
+      sections: Object.keys(b.data?.sections || {}),
+      uploadedAt: b.uploadedAt
+    }));
+    items.sort((a, b) => (b.lastSavedAt || '').localeCompare(a.lastSavedAt || ''));
+    res.json({ mode, count: items.length, items });
+  } catch (err) {
+    res.status(500).json({ error: String(err && err.message || err) });
+  }
+});
+
+// ── Get full entry for a mode + period ──
+app.get('/api/v1/archive/:mode/:period', checkReadToken, async (req, res) => {
+  const { mode } = req.params;
+  const period = decodeURIComponent(req.params.period || '');
+  if (!VALID_MODE.has(mode)) return res.status(400).json({ error: 'Invalid mode' });
+  try {
+    const entry = await storage.getJSON(ARCHIVE_PATH(mode, period));
+    if (!entry) return res.status(404).json({ error: 'Not found', mode, period });
+    res.json(entry);
+  } catch (err) {
+    res.status(500).json({ error: String(err && err.message || err) });
+  }
+});
+
+// ── Dump all archives (every mode, every period) — heavy, useful for sync ──
+app.get('/api/v1/archive', checkReadToken, async (_req, res) => {
+  try {
+    const out = { weekly: [], monthly: [], quarterly: [] };
+    for (const mode of ['weekly', 'monthly', 'quarterly']) {
+      const blobs = await storage.listPrefix(ARCHIVE_PREFIX(mode));
+      out[mode] = blobs.map(b => b.data).filter(Boolean);
+    }
+    res.json({
+      generatedAt: new Date().toISOString(),
+      counts: { weekly: out.weekly.length, monthly: out.monthly.length, quarterly: out.quarterly.length },
+      data: out
+    });
+  } catch (err) {
+    res.status(500).json({ error: String(err && err.message || err) });
+  }
+});
+
+// ── Get one specific SECTION within an entry (lightweight) ──
+app.get('/api/v1/archive/:mode/:period/:sectionId', checkReadToken, async (req, res) => {
+  const { mode, sectionId } = req.params;
+  const period = decodeURIComponent(req.params.period || '');
+  if (!VALID_MODE.has(mode)) return res.status(400).json({ error: 'Invalid mode' });
+  try {
+    const entry = await storage.getJSON(ARCHIVE_PATH(mode, period));
+    if (!entry) return res.status(404).json({ error: 'Entry not found', mode, period });
+    const section = entry.sections && entry.sections[sectionId];
+    if (!section) return res.status(404).json({ error: 'Section not found', sectionId });
+    res.json({
+      mode, period: entry.period, sectionId, section,
+      savedAt: entry.savedAt && entry.savedAt[sectionId],
+      lastSavedBy: entry.lastSavedBy
+    });
+  } catch (err) {
+    res.status(500).json({ error: String(err && err.message || err) });
+  }
+});
+
+
 module.exports = app;
