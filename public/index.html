@@ -2681,7 +2681,18 @@ async function searchArchive() {
         : h._isLocal
         ? '<button class="hub-ar-btn open" onclick="archiveOpenLocal(\'' + type + '\')">▶ Open</button>'
         : '<button class="hub-ar-btn" onclick="archivePreview(' + h.id + ',\'' + type + '\')">👁 Preview</button>'
-          + '<button class="hub-ar-btn open" onclick="archiveLoad(' + h.id + ',\'' + type + '\')">✏️ Edit</button>');
+          + '<button class="hub-ar-btn open" onclick="archiveLoad(' + h.id + ',\'' + type + '\')">✏️ Edit</button>')
+      + '</div></div>';
+  }).join('');
+}
+
+async function archivePreview(id, type) {
+  try {
+    const res = await fetch(`${API_BASE}/reports/${type}/history/${id}`);
+    const json = await res.json();
+    if (json.data) {
+      const parsed = (typeof json.data === 'string') ? JSON.parse(json.data) : json.data;
+      showPresentation(parsed, 'Archive — v' + (json.version || ''));
     }
   } catch(e) { alert('Failed to load this report'); }
 }
