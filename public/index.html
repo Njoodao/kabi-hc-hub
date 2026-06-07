@@ -1387,6 +1387,16 @@ function collect(){
       p: document.querySelector(`.p-inp[data-s="${s}"]`)?.value||'',
       kp: kp2(s+'-kp'), ac: ac2(s+'-ac'), ch: tr2(s+'-ch'), nw: nw2(s+'-nw')
     };
+    // Ops section also has In & Out data
+    if (s === 'ops' && typeof ioCollectTable === 'function') {
+      const inFte    = ioCollectTable('io-in-fte-tbl');
+      const inNonFte = ioCollectTable('io-in-nonfte-tbl');
+      const outFte   = ioCollectTable('io-out-fte-tbl');
+      const outNonFte= ioCollectTable('io-out-nonfte-tbl');
+      if (inFte.length || inNonFte.length || outFte.length || outNonFte.length) {
+        d.secs[s].io = { inFte, inNonFte, outFte, outNonFte };
+      }
+    }
   });
   d.secs.it={
     p: document.querySelector('.p-inp[data-s="it"]')?.value||'',
@@ -1840,62 +1850,168 @@ async function runExport(){
     s.addShape('rect',{x:0,y:5.2,w:10,h:.425,fill:{color:C.nm},line:{color:C.nm}});
     s.addText('KABi  ·  Human Capital',{x:0,y:5.2,w:10,h:.425,fontFace:'Calibri',fontSize:9,color:'3A5A78',align:'center',valign:'middle',margin:0});
   }
-  function KP(lbl,rows){
-    if(!rows?.length) return;
-    const s=P.addSlide(); s.background={color:C.white}; H(s,lbl); PT(s,MODE_CFG.kpTitle);
-    const T=1.46,W1=3.6,W2=5.57,RH=.58,X1=.45,X2=X1+W1+.08;
-    s.addShape('rect',{x:X1,y:T,w:W1,h:.34,fill:{color:C.navy},line:{color:C.navy}});
-    s.addText('TASK',{x:X1+.14,y:T,w:W1,h:.34,fontFace:'Calibri',fontSize:9,bold:true,color:C.white,valign:'middle',margin:0});
-    s.addShape('rect',{x:X2,y:T,w:W2,h:.34,fill:{color:C.teal},line:{color:C.teal}});
-    s.addText('STATUS',{x:X2+.14,y:T,w:W2,h:.34,fontFace:'Calibri',fontSize:9,bold:true,color:C.navy,valign:'middle',margin:0});
-    rows.forEach((r,i)=>{
-      const y=T+.34+i*RH,bg=i%2===0?C.white:C.ra;
-      s.addShape('rect',{x:X1,y,w:W1,h:RH,fill:{color:bg},line:{color:C.bd,width:.5}});
-      s.addShape('rect',{x:X2,y,w:W2,h:RH,fill:{color:bg},line:{color:C.bd,width:.5}});
-      s.addText((i+1)+'.  '+(r[0]||''),{x:X1+.14,y:y+.04,w:W1-.2,h:RH-.08,fontFace:'Calibri',fontSize:11,bold:true,color:C.td,valign:'middle',margin:0});
-      s.addText(r[1]||'',{x:X2+.14,y:y+.04,w:W2-.2,h:RH-.08,fontFace:'Calibri',fontSize:11,color:C.tm,valign:'middle',margin:0});
+  // KP — Key Points table with TASK + STATUS + DETAILS columns.
+  // Paginates at 6 rows per slide; continuation slides get "(continued)" in the
+  // sub-title and continue the row numbering across slides.
+  function KP(lbl, rows) {
+    if (!rows?.length) return;
+    const PAGE = 6;
+    const total = rows.length;
+    for (let p = 0; p < total; p += PAGE) {
+      const chunk = rows.slice(p, p + PAGE);
+      const isCont = p > 0;
+      const s = P.addSlide(); s.background = { color: C.white }; H(s, lbl);
+      PT(s, MODE_CFG.kpTitle + (isCont ? ' (continued)' : ''));
+      const T = 1.46;
+      // 3 columns: TASK | STATUS | DETAILS
+      const W1 = 2.4, W2 = 1.3, W3 = 5.47;
+      const X1 = .45, X2 = X1 + W1 + .06, X3 = X2 + W2 + .06;
+      const RH = .68;
+      // Header row
+      s.addShape('rect',{x:X1,y:T,w:W1,h:.34,fill:{color:C.navy},line:{color:C.navy}});
+      s.addText('TASK',{x:X1+.14,y:T,w:W1,h:.34,fontFace:'Calibri',fontSize:9,bold:true,color:C.white,valign:'middle',margin:0});
+      s.addShape('rect',{x:X2,y:T,w:W2,h:.34,fill:{color:C.teal},line:{color:C.teal}});
+      s.addText('STATUS',{x:X2+.14,y:T,w:W2,h:.34,fontFace:'Calibri',fontSize:9,bold:true,color:C.navy,valign:'middle',margin:0});
+      s.addShape('rect',{x:X3,y:T,w:W3,h:.34,fill:{color:C.navy},line:{color:C.navy}});
+      s.addText('DETAILS',{x:X3+.14,y:T,w:W3,h:.34,fontFace:'Calibri',fontSize:9,bold:true,color:C.white,valign:'middle',margin:0});
+      chunk.forEach((r, i) => {
+        const idx = p + i + 1;
+        const y = T + .34 + i * RH;
+        const bg = i % 2 === 0 ? C.white : C.ra;
+        s.addShape('rect',{x:X1,y,w:W1,h:RH,fill:{color:bg},line:{color:C.bd,width:.5}});
+        s.addShape('rect',{x:X2,y,w:W2,h:RH,fill:{color:bg},line:{color:C.bd,width:.5}});
+        s.addShape('rect',{x:X3,y,w:W3,h:RH,fill:{color:bg},line:{color:C.bd,width:.5}});
+        s.addText(idx + '.  ' + (r[0] || ''),{x:X1+.14,y:y+.04,w:W1-.2,h:RH-.08,fontFace:'Calibri',fontSize:10.5,bold:true,color:C.td,valign:'middle',margin:0});
+        s.addText(r[1] || '',{x:X2+.14,y:y+.04,w:W2-.2,h:RH-.08,fontFace:'Calibri',fontSize:10,color:C.tm,valign:'middle',align:'center',margin:0});
+        s.addText(r[2] || '',{x:X3+.14,y:y+.04,w:W3-.2,h:RH-.08,fontFace:'Calibri',fontSize:9.5,color:C.tm,valign:'middle',margin:0});
+      });
+    }
+  }
+
+  // IO — In & Out tables for ops section
+  function IO(lbl, io) {
+    if (!io) return;
+    const groups = [
+      { title: 'New Joiners — FTE',     rows: io.inFte    || [], headerColor: C.teal },
+      { title: 'New Joiners — Non-FTE', rows: io.inNonFte || [], headerColor: C.teal },
+      { title: 'Exits — FTE',           rows: io.outFte   || [], headerColor: C.green },
+      { title: 'Exits — Non-FTE',       rows: io.outNonFte|| [], headerColor: C.green },
+    ];
+    const cols = [
+      { lbl: 'Name',         w: 1.45 },
+      { lbl: 'Job Title',    w: 1.45 },
+      { lbl: 'Type',         w: 1.00 },
+      { lbl: 'Department',   w: 1.10 },
+      { lbl: 'Manager',      w: 1.10 },
+      { lbl: 'Location',     w: 0.85 },
+      { lbl: 'Date',         w: 0.85 },
+      { lbl: 'Reason',       w: 1.05 },
+    ];
+    // Each row in the io tables is positional and 9 cells long after Job Title migration:
+    //   [name, jobTitle, type, dept, manager, location, date, reason, notes]
+    // We render 8 of those (skipping the long notes column to fit the slide).
+    const PAGE = 8;
+    groups.forEach(g => {
+      if (!g.rows.length) return;
+      const total = g.rows.length;
+      for (let p = 0; p < total; p += PAGE) {
+        const chunk = g.rows.slice(p, p + PAGE);
+        const isCont = p > 0;
+        const s = P.addSlide(); s.background = { color: C.white }; H(s, lbl);
+        PT(s, g.title + (isCont ? ' (continued)' : ''));
+        const T = 1.46, RH = .42;
+        let X = .45;
+        // Header
+        cols.forEach((c, i) => {
+          const bgCol = i === 0 ? C.navy : g.headerColor;
+          const fgCol = i === 0 ? C.white : C.navy;
+          s.addShape('rect',{x:X,y:T,w:c.w,h:.34,fill:{color:bgCol},line:{color:bgCol}});
+          s.addText(c.lbl,{x:X+.08,y:T,w:c.w-.1,h:.34,fontFace:'Calibri',fontSize:8.5,bold:true,color:fgCol,valign:'middle',margin:0});
+          X += c.w;
+        });
+        // Rows
+        chunk.forEach((r, i) => {
+          const y = T + .34 + i * RH;
+          const bg = i % 2 === 0 ? C.white : C.ra;
+          let X2 = .45;
+          // r layout: [name, jobTitle, type, dept, manager, location, date, reason, notes]
+          const vals = [r[0]||'', r[1]||'', r[2]||'', r[3]||'', r[4]||'', r[5]||'', r[6]||'', r[7]||''];
+          cols.forEach((c, j) => {
+            s.addShape('rect',{x:X2,y,w:c.w,h:RH,fill:{color:bg},line:{color:C.bd,width:.5}});
+            s.addText(vals[j],{x:X2+.08,y:y+.02,w:c.w-.1,h:RH-.04,fontFace:'Calibri',fontSize:9,bold:j===0,color:j===0?C.td:C.tm,valign:'middle',margin:0});
+            X2 += c.w;
+          });
+        });
+      }
     });
   }
-  function AC(lbl,items){
-    if(!items?.length) return;
-    const s=P.addSlide(); s.background={color:C.bg}; H(s,lbl); PT(s,'Key Accomplishments');
-    const cols=Math.min(items.length,4),cW=(9.1-(cols-1)*.17)/cols,sX=.45,sY=1.5;
-    items.forEach((item,i)=>{
-      const x=sX+(i%cols)*(cW+.17),y=sY+Math.floor(i/cols)*1.75;
-      s.addShape('rect',{x,y,w:cW,h:1.5,fill:{color:C.white},line:{color:C.bd,width:.75},shadow:SH()});
-      s.addShape('rect',{x,y,w:cW,h:.05,fill:{color:C.teal},line:{color:C.teal}});
-      s.addShape('oval',{x:x+cW/2-.22,y:y+.16,w:.44,h:.44,fill:{color:C.navy},line:{color:C.navy}});
-      s.addText(String(i+1),{x:x+cW/2-.22,y:y+.16,w:.44,h:.44,fontFace:'Calibri',fontSize:12,bold:true,color:C.teal,align:'center',valign:'middle',margin:0});
-      s.addText(item,{x:x+.09,y:y+.72,w:cW-.18,h:.68,fontFace:'Calibri',fontSize:11,color:C.td,align:'center',valign:'top',margin:0});
-    });
+  function AC(lbl, items) {
+    if (!items?.length) return;
+    const PAGE = 8; // 4 cols × 2 rows
+    const total = items.length;
+    for (let p = 0; p < total; p += PAGE) {
+      const chunk = items.slice(p, p + PAGE);
+      const isCont = p > 0;
+      const s = P.addSlide(); s.background = { color: C.bg }; H(s, lbl);
+      PT(s, 'Key Accomplishments' + (isCont ? ' (continued)' : ''));
+      const cols = Math.min(chunk.length, 4);
+      const cW = (9.1 - (cols - 1) * .17) / cols;
+      const sX = .45, sY = 1.5;
+      chunk.forEach((item, i) => {
+        const x = sX + (i % cols) * (cW + .17);
+        const y = sY + Math.floor(i / cols) * 1.75;
+        const idx = p + i + 1;
+        s.addShape('rect',{x,y,w:cW,h:1.5,fill:{color:C.white},line:{color:C.bd,width:.75},shadow:SH()});
+        s.addShape('rect',{x,y,w:cW,h:.05,fill:{color:C.teal},line:{color:C.teal}});
+        s.addShape('oval',{x:x+cW/2-.22,y:y+.16,w:.44,h:.44,fill:{color:C.navy},line:{color:C.navy}});
+        s.addText(String(idx),{x:x+cW/2-.22,y:y+.16,w:.44,h:.44,fontFace:'Calibri',fontSize:12,bold:true,color:C.teal,align:'center',valign:'middle',margin:0});
+        s.addText(item,{x:x+.09,y:y+.72,w:cW-.18,h:.68,fontFace:'Calibri',fontSize:11,color:C.td,align:'center',valign:'top',margin:0});
+      });
+    }
   }
-  function CH(lbl,rows){
-    if(!rows?.length) return;
-    const s=P.addSlide(); s.background={color:C.white}; H(s,lbl); PT(s,'Challenges & Actions Needed');
-    const T=1.46,W1=4.22,W2=4.93,RH=.6,X1=.45,X2=X1+W1+.08;
-    s.addShape('rect',{x:X1,y:T,w:W1,h:.34,fill:{color:C.navy},line:{color:C.navy}});
-    s.addText('CHALLENGE',{x:X1+.14,y:T,w:W1,h:.34,fontFace:'Calibri',fontSize:9,bold:true,color:C.white,valign:'middle',margin:0});
-    s.addShape('rect',{x:X2,y:T,w:W2,h:.34,fill:{color:C.green},line:{color:C.green}});
-    s.addText('ACTION REQUIRED',{x:X2+.14,y:T,w:W2,h:.34,fontFace:'Calibri',fontSize:9,bold:true,color:C.white,valign:'middle',margin:0});
-    rows.forEach((r,i)=>{
-      const y=T+.34+i*RH,bg=i%2===0?C.white:C.ra;
-      s.addShape('rect',{x:X1,y,w:W1,h:RH,fill:{color:bg},line:{color:C.bd,width:.5}});
-      s.addShape('rect',{x:X2,y,w:W2,h:RH,fill:{color:bg},line:{color:C.bd,width:.5}});
-      s.addText((i+1)+'.  '+(r[0]||''),{x:X1+.14,y:y+.04,w:W1-.2,h:RH-.08,fontFace:'Calibri',fontSize:11,bold:true,color:C.td,valign:'middle',margin:0});
-      s.addText(r[1]||'',{x:X2+.14,y:y+.04,w:W2-.2,h:RH-.08,fontFace:'Calibri',fontSize:11,color:C.tm,valign:'middle',margin:0});
-    });
+  function CH(lbl, rows) {
+    if (!rows?.length) return;
+    const PAGE = 6;
+    const total = rows.length;
+    for (let p = 0; p < total; p += PAGE) {
+      const chunk = rows.slice(p, p + PAGE);
+      const isCont = p > 0;
+      const s = P.addSlide(); s.background = { color: C.white }; H(s, lbl);
+      PT(s, 'Challenges & Actions Needed' + (isCont ? ' (continued)' : ''));
+      const T = 1.46, W1 = 4.22, W2 = 4.93, RH = .6, X1 = .45, X2 = X1 + W1 + .08;
+      s.addShape('rect',{x:X1,y:T,w:W1,h:.34,fill:{color:C.navy},line:{color:C.navy}});
+      s.addText('CHALLENGE',{x:X1+.14,y:T,w:W1,h:.34,fontFace:'Calibri',fontSize:9,bold:true,color:C.white,valign:'middle',margin:0});
+      s.addShape('rect',{x:X2,y:T,w:W2,h:.34,fill:{color:C.green},line:{color:C.green}});
+      s.addText('ACTION REQUIRED',{x:X2+.14,y:T,w:W2,h:.34,fontFace:'Calibri',fontSize:9,bold:true,color:C.white,valign:'middle',margin:0});
+      chunk.forEach((r, i) => {
+        const idx = p + i + 1;
+        const y = T + .34 + i * RH, bg = i % 2 === 0 ? C.white : C.ra;
+        s.addShape('rect',{x:X1,y,w:W1,h:RH,fill:{color:bg},line:{color:C.bd,width:.5}});
+        s.addShape('rect',{x:X2,y,w:W2,h:RH,fill:{color:bg},line:{color:C.bd,width:.5}});
+        s.addText(idx + '.  ' + (r[0] || ''),{x:X1+.14,y:y+.04,w:W1-.2,h:RH-.08,fontFace:'Calibri',fontSize:11,bold:true,color:C.td,valign:'middle',margin:0});
+        s.addText(r[1] || '',{x:X2+.14,y:y+.04,w:W2-.2,h:RH-.08,fontFace:'Calibri',fontSize:11,color:C.tm,valign:'middle',margin:0});
+      });
+    }
   }
-  function NW(lbl,items){
-    if(!items?.length) return;
-    const s=P.addSlide(); s.background={color:C.bg}; H(s,lbl); PT(s,MODE_CFG.nwTitle);
-    items.forEach((item,i)=>{
-      const RH=.52,y=1.5+i*(RH+.09);
-      s.addShape('oval',{x:.45,y:y+.04,w:.44,h:.44,fill:{color:C.navy},line:{color:C.navy}});
-      s.addText(String(i+1),{x:.45,y:y+.04,w:.44,h:.44,fontFace:'Calibri',fontSize:11,bold:true,color:C.teal,align:'center',valign:'middle',margin:0});
-      s.addShape('rect',{x:1.04,y,w:8.51,h:RH,fill:{color:C.white},line:{color:C.bd,width:.75},shadow:SH()});
-      s.addShape('rect',{x:1.04,y,w:.06,h:RH,fill:{color:C.teal},line:{color:C.teal}});
-      s.addText(item,{x:1.2,y:y+.04,w:8.2,h:RH-.08,fontFace:'Calibri',fontSize:11,color:C.td,valign:'middle',margin:0});
-    });
+  function NW(lbl, items) {
+    if (!items?.length) return;
+    const PAGE = 6;
+    const total = items.length;
+    for (let p = 0; p < total; p += PAGE) {
+      const chunk = items.slice(p, p + PAGE);
+      const isCont = p > 0;
+      const s = P.addSlide(); s.background = { color: C.bg }; H(s, lbl);
+      PT(s, MODE_CFG.nwTitle + (isCont ? ' (continued)' : ''));
+      chunk.forEach((item, i) => {
+        const idx = p + i + 1;
+        const RH = .52, y = 1.5 + i * (RH + .09);
+        s.addShape('oval',{x:.45,y:y+.04,w:.44,h:.44,fill:{color:C.navy},line:{color:C.navy}});
+        s.addText(String(idx),{x:.45,y:y+.04,w:.44,h:.44,fontFace:'Calibri',fontSize:11,bold:true,color:C.teal,align:'center',valign:'middle',margin:0});
+        s.addShape('rect',{x:1.04,y,w:8.51,h:RH,fill:{color:C.white},line:{color:C.bd,width:.75},shadow:SH()});
+        s.addShape('rect',{x:1.04,y,w:.06,h:RH,fill:{color:C.teal},line:{color:C.teal}});
+        s.addText(item,{x:1.2,y:y+.04,w:8.2,h:RH-.08,fontFace:'Calibri',fontSize:11,color:C.td,valign:'middle',margin:0});
+      });
+    }
   }
 
   // COVER
@@ -1929,7 +2045,9 @@ async function runExport(){
   [['ops','Operations','Operations'],['hcdev','HC Dev & PM','HC Development\n& Performance Mgmt'],
    ['ic','Internal Comms','Internal Communication'],['ta','Talent Acquisition','Talent Acquisition']].forEach(([k,lbl,name])=>{
     const sd=D.secs[k]||{};
-    DIV(name,sd.p); KP(lbl,sd.kp); AC(lbl,sd.ac); CH(lbl,sd.ch); NW(lbl,sd.nw);
+    DIV(name,sd.p); KP(lbl,sd.kp); AC(lbl,sd.ac);
+    if (k === 'ops' && sd.io) IO(lbl, sd.io);
+    CH(lbl,sd.ch); NW(lbl,sd.nw);
   });
 
   // IT
@@ -1950,21 +2068,27 @@ async function runExport(){
         s.addText(c[1],{x:cx,y:2.55,w:2,h:.38,fontFace:'Calibri',fontSize:10,color:C.tm,align:'center',margin:0});
       });
     }
-    // ticket highlight
-    if(it.tk?.length){
-      const s=P.addSlide(); s.background={color:C.white}; H(s,'IT'); PT(s,MODE_CFG.itHlTitle);
-      const T=1.46,c1=1.55,c2=5.22,c3=1.83,X1=.45,X2=X1+c1+.08,X3=X2+c2+.08,RH=.6;
-      [[X1,c1,'CATEGORY',C.navy],[X2,c2,'DESCRIPTION',C.navy],[X3,c3,'STATUS',C.green]].forEach(([x,w,l,bg])=>{
-        s.addShape('rect',{x,y:T,w,h:.34,fill:{color:bg},line:{color:bg}});
-        s.addText(l,{x:x+.1,y:T,w:w-.1,h:.34,fontFace:'Calibri',fontSize:9,bold:true,color:C.white,valign:'middle',margin:0});
-      });
-      it.tk.forEach((r,i)=>{
-        const y=T+.34+i*RH,bg=i%2===0?C.white:C.ra;
-        [[X1,c1,r[0],true],[X2,c2,r[1],false],[X3,c3,r[2],false]].forEach(([x,w,t,b])=>{
-          s.addShape('rect',{x,y,w,h:RH,fill:{color:bg},line:{color:C.bd,width:.5}});
-          s.addText(t||'',{x:x+.1,y:y+.04,w:w-.2,h:RH-.08,fontFace:'Calibri',fontSize:11,bold:b,color:b?C.td:C.tm,valign:'middle',margin:0});
+    // ticket highlight (paginated at 6 per slide)
+    if (it.tk?.length) {
+      const PAGE = 6;
+      for (let p = 0; p < it.tk.length; p += PAGE) {
+        const chunk = it.tk.slice(p, p + PAGE);
+        const isCont = p > 0;
+        const s = P.addSlide(); s.background = { color: C.white }; H(s, 'IT');
+        PT(s, MODE_CFG.itHlTitle + (isCont ? ' (continued)' : ''));
+        const T = 1.46, c1 = 1.55, c2 = 5.22, c3 = 1.83, X1 = .45, X2 = X1 + c1 + .08, X3 = X2 + c2 + .08, RH = .6;
+        [[X1, c1, 'CATEGORY', C.navy], [X2, c2, 'DESCRIPTION', C.navy], [X3, c3, 'STATUS', C.green]].forEach(([x, w, l, bg]) => {
+          s.addShape('rect', { x, y: T, w, h: .34, fill: { color: bg }, line: { color: bg } });
+          s.addText(l, { x: x + .1, y: T, w: w - .1, h: .34, fontFace: 'Calibri', fontSize: 9, bold: true, color: C.white, valign: 'middle', margin: 0 });
         });
-      });
+        chunk.forEach((r, i) => {
+          const y = T + .34 + i * RH, bg = i % 2 === 0 ? C.white : C.ra;
+          [[X1, c1, r[0], true], [X2, c2, r[1], false], [X3, c3, r[2], false]].forEach(([x, w, t, b]) => {
+            s.addShape('rect', { x, y, w, h: RH, fill: { color: bg }, line: { color: C.bd, width: .5 } });
+            s.addText(t || '', { x: x + .1, y: y + .04, w: w - .2, h: RH - .08, fontFace: 'Calibri', fontSize: 11, bold: b, color: b ? C.td : C.tm, valign: 'middle', margin: 0 });
+          });
+        });
+      }
     }
     KP('IT',it.kp); AC('IT',it.ac); CH('IT',it.ch); NW('IT',it.nw);
   }
@@ -1973,20 +2097,26 @@ async function runExport(){
   {
     const fac=D.secs.fac||{};
     DIV('Facility',fac.p);
-    if(fac.tk?.length){
-      const s=P.addSlide(); s.background={color:C.white}; H(s,'Facility'); PT(s,'Facility Tickets');
-      const T=1.46,c1=1.72,c2=5.36,c3=1.83,X1=.45,X2=X1+c1+.08,X3=X2+c2+.08,RH=.6;
-      [[X1,c1,'CATEGORY',C.navy],[X2,c2,'DESCRIPTION',C.navy],[X3,c3,'STATUS',C.green]].forEach(([x,w,l,bg])=>{
-        s.addShape('rect',{x,y:T,w,h:.34,fill:{color:bg},line:{color:bg}});
-        s.addText(l,{x:x+.1,y:T,w:w-.1,h:.34,fontFace:'Calibri',fontSize:9,bold:true,color:C.white,valign:'middle',margin:0});
-      });
-      fac.tk.forEach((r,i)=>{
-        const y=T+.34+i*RH,bg=i%2===0?C.white:C.ra;
-        [[X1,c1,r[0],true],[X2,c2,r[1],false],[X3,c3,r[2],false]].forEach(([x,w,t,b])=>{
-          s.addShape('rect',{x,y,w,h:RH,fill:{color:bg},line:{color:C.bd,width:.5}});
-          s.addText(t||'',{x:x+.1,y:y+.04,w:w-.2,h:RH-.08,fontFace:'Calibri',fontSize:11,bold:b,color:b?C.td:C.tm,valign:'middle',margin:0});
+    if (fac.tk?.length) {
+      const PAGE = 6;
+      for (let p = 0; p < fac.tk.length; p += PAGE) {
+        const chunk = fac.tk.slice(p, p + PAGE);
+        const isCont = p > 0;
+        const s = P.addSlide(); s.background = { color: C.white }; H(s, 'Facility');
+        PT(s, 'Facility Tickets' + (isCont ? ' (continued)' : ''));
+        const T = 1.46, c1 = 1.72, c2 = 5.36, c3 = 1.83, X1 = .45, X2 = X1 + c1 + .08, X3 = X2 + c2 + .08, RH = .6;
+        [[X1, c1, 'CATEGORY', C.navy], [X2, c2, 'DESCRIPTION', C.navy], [X3, c3, 'STATUS', C.green]].forEach(([x, w, l, bg]) => {
+          s.addShape('rect', { x, y: T, w, h: .34, fill: { color: bg }, line: { color: bg } });
+          s.addText(l, { x: x + .1, y: T, w: w - .1, h: .34, fontFace: 'Calibri', fontSize: 9, bold: true, color: C.white, valign: 'middle', margin: 0 });
         });
-      });
+        chunk.forEach((r, i) => {
+          const y = T + .34 + i * RH, bg = i % 2 === 0 ? C.white : C.ra;
+          [[X1, c1, r[0], true], [X2, c2, r[1], false], [X3, c3, r[2], false]].forEach(([x, w, t, b]) => {
+            s.addShape('rect', { x, y, w, h: RH, fill: { color: bg }, line: { color: C.bd, width: .5 } });
+            s.addText(t || '', { x: x + .1, y: y + .04, w: w - .2, h: RH - .08, fontFace: 'Calibri', fontSize: 11, bold: b, color: b ? C.td : C.tm, valign: 'middle', margin: 0 });
+          });
+        });
+      }
     }
     KP('Facility',fac.kp); AC('Facility',fac.ac);
     // purchases
@@ -4969,14 +5099,15 @@ function buildStandardSectionHTML(sec) {
 // IN & OUT — Employee movement tracker (FTE / Non-FTE)
 // ═══════════════════════════════════════════════════════════════════
 const IO_DEFAULT_COLS = [
-  { key: 'name',     label: 'Full Name',      width: '15%', type: 'text' },
+  { key: 'name',     label: 'Full Name',      width: '13%', type: 'text' },
+  { key: 'jobTitle', label: 'Job Title',      width: '13%', type: 'text' },
   { key: 'type',     label: 'FTE / Non-FTE',  width: '10%', type: 'select', options: ['FTE','Non-FTE (Intern)','Non-FTE (Contractor)','Non-FTE (Other)'] },
-  { key: 'dept',     label: 'Department',      width: '12%', type: 'text' },
-  { key: 'manager',  label: 'Line Manager',    width: '12%', type: 'text' },
-  { key: 'location', label: 'Location',        width: '10%', type: 'select', options: ['Riyadh','Jordan','Palestine','Dubai','Remote','Other'] },
-  { key: 'date',     label: 'Date',            width: '10%', type: 'date' },
-  { key: 'reason',   label: 'Type',            width: '10%', type: 'select', options: ['Voluntary','Non-Voluntary','End of Contract','Transfer'] },
-  { key: 'notes',    label: 'Notes',           width: '16%', type: 'text' },
+  { key: 'dept',     label: 'Department',      width: '10%', type: 'text' },
+  { key: 'manager',  label: 'Line Manager',    width: '10%', type: 'text' },
+  { key: 'location', label: 'Location',        width: '9%',  type: 'select', options: ['Riyadh','Jordan','Palestine','Dubai','Remote','Other'] },
+  { key: 'date',     label: 'Date',            width: '9%',  type: 'date' },
+  { key: 'reason',   label: 'Type',            width: '9%',  type: 'select', options: ['Voluntary','Non-Voluntary','End of Contract','Transfer'] },
+  { key: 'notes',    label: 'Notes',           width: '12%', type: 'text' },
 ];
 
 function buildInOutInner() {
@@ -5083,7 +5214,15 @@ function ioCollectTable(tableId) {
 
 function ioRestoreTable(tableId, direction, data) {
   if (!data || !data.length) return;
-  data.forEach(row => ioAddRow(tableId, direction, row));
+  data.forEach(row => {
+    // Backward-compat: legacy rows have 8 cells (no Job Title).
+    // New schema is 9 cells with Job Title at index 1. Migrate by inserting
+    // an empty Job Title at index 1 if the row is the old length.
+    if (Array.isArray(row) && row.length === 8) {
+      row = [row[0], '', row[1], row[2], row[3], row[4], row[5], row[6], row[7]];
+    }
+    ioAddRow(tableId, direction, row);
+  });
 }
 
 function buildAllMainHTML() {
