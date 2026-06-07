@@ -3447,22 +3447,55 @@ async function archiveEntryPreview(slug, mode) {
       '</tbody></table>';
     };
 
-    // Render In/Out movements (object with inFte, inNonFte, outFte, outNonFte)
+    // Render In/Out movements stored as { inFte:[[...],...], inNonFte:[...], outFte:[...], outNonFte:[...] }
+    // where each row is a positional array following IO_DEFAULT_COLS:
+    //   [name, jobTitle, type, dept, manager, location, date, reason, notes]
+    // Legacy data may be 8 cells (no Job Title) — auto-migrated for display.
     const renderIoTable = (io) => {
       if (!io || typeof io !== 'object') return '';
       const blocks = [];
-      const titles = { inFte:'In — FTE', inNonFte:'In — Non-FTE', outFte:'Out — FTE', outNonFte:'Out — Non-FTE' };
+      const titles = { inFte:'New Joiners — FTE', inNonFte:'New Joiners — Non-FTE', outFte:'Exits — FTE', outNonFte:'Exits — Non-FTE' };
       const colors = { inFte:'#059669', inNonFte:'#059669', outFte:'#DC2626', outNonFte:'#DC2626' };
+      const headers = ['Name', 'Job Title', 'Type', 'Department', 'Manager', 'Location', 'Date', 'Reason', 'Notes'];
+
       for (const key of ['inFte','inNonFte','outFte','outNonFte']) {
-        const rows = io[key] || [];
-        if (!rows.length) continue;
-        const cols = Object.keys(rows[0]).filter(k => k !== '_id' && k !== '_idx');
+        const raw = io[key] || [];
+        if (!raw.length) continue;
+
+        // Normalize each row: object → positional array, or migrate 8→9 cells.
+        const rows = raw.map(row => {
+          if (Array.isArray(row)) {
+            if (row.length === 8) {
+              // Legacy: insert empty Job Title at index 1
+              return [row[0], '', row[1], row[2], row[3], row[4], row[5], row[6], row[7]];
+            }
+            return row;
+          }
+          if (row && typeof row === 'object') {
+            // Object schema (older variant): map by known keys
+            return [
+              row.name || row.fullName || '',
+              row.jobTitle || row.title || '',
+              row.type || '',
+              row.dept || row.department || '',
+              row.manager || row.lineManager || '',
+              row.location || '',
+              row.date || row.startDate || row.endDate || '',
+              row.reason || row.exitReason || '',
+              row.notes || ''
+            ];
+          }
+          return [];
+        });
+
         blocks.push(
-          '<div style="margin-top:10px"><div style="font-weight:600;font-size:11.5px;color:' + colors[key] + ';margin-bottom:4px">' + titles[key] + ' (' + rows.length + ')</div>' +
-          '<div style="overflow-x:auto"><table style="' + tblStyle + ';min-width:520px">' +
-            '<thead><tr>' + cols.map(c => '<th style="' + thStyle + '">' + escCell(c) + '</th>').join('') + '</tr></thead>' +
+          '<div style="margin-top:12px"><div style="font-weight:700;font-size:12px;color:' + colors[key] + ';margin-bottom:6px;display:flex;align-items:center;gap:6px">' +
+            (key.startsWith('in') ? '▲' : '▼') + ' ' + titles[key] + ' (' + rows.length + ')' +
+          '</div>' +
+          '<div style="overflow-x:auto"><table style="' + tblStyle + ';min-width:780px">' +
+            '<thead><tr>' + headers.map(h => '<th style="' + thStyle + '">' + escCell(h) + '</th>').join('') + '</tr></thead>' +
             '<tbody>' + rows.map(r =>
-              '<tr>' + cols.map(c => '<td style="' + tdStyle + '">' + escCell(r[c]) + '</td>').join('') + '</tr>'
+              '<tr>' + headers.map((_, i) => '<td style="' + tdStyle + '">' + escCell(r[i] || '') + '</td>').join('') + '</tr>'
             ).join('') + '</tbody>' +
           '</table></div></div>'
         );
@@ -3973,6 +4006,26 @@ async function searchArchive() {
         }];
       }
     }
+
+    // 3.5) Dedup: when a saved (server or LS) archive entry exists for a
+    //      given period+mode, hide the matching HISTORICAL_DATA embedded
+    //      preload. The user's saved version supersedes the preloaded one.
+    try {
+      const savedSlugs = new Set(
+        historyItems
+          .filter(h => h._isArchiveEntry && h._archiveSlug && h._archiveMode === type)
+          .map(h => h._archiveSlug)
+      );
+      if (savedSlugs.size) {
+        historyItems = historyItems.filter(h => {
+          if (!h._isEmbedded) return true;
+          const emSlug = (typeof _slugify === 'function')
+            ? _slugify(h._parsed?.week || '')
+            : String(h._parsed?.week || '').toLowerCase().replace(/\s+/g, '-');
+          return !savedSlugs.has(emSlug);
+        });
+      }
+    } catch (e) { console.warn('dedup failed:', e); }
 
     // 4) Filter by user inputs
     const filtered = historyItems.filter(h => {
