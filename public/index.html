@@ -4178,16 +4178,75 @@ async function editEmbedded(idx) {
     _safeStorage.setItem('kabi_custom_sections', JSON.stringify(_customSections));
   }
   
+  // Mark this session as archive-edit so _checkPeriodArchive skips the
+  // duplicate warning / auto-hide for the same period the user is editing.
+  _isEditingArchive = true;
+  _editingArchiveCtx = { slug: _slugify(entry.week || ''), mode: mode, embedded: true, embIdx: idx };
+
   // Set pending edit data — openDash will pick this up
   _pendingEditData = entry;
-  
+
   // Close any overlays
   const histOv = document.getElementById('hist-ov');
   if (histOv) histOv.classList.remove('on');
-  
+
   // Open dashboard — it will use _pendingEditData
   await openDash(mode);
-  
+
+  // Show the edit-mode banner so the user knows they're in archive-edit mode
+  setTimeout(() => {
+    try {
+      // Belt-and-suspenders: remove the duplicate-period banner if it slipped through
+      const oldB = document.getElementById('period-archive-banner');
+      if (oldB) oldB.remove();
+      // Also ensure no section was auto-hidden as "already in archive"
+      document.querySelectorAll('.section-saved-note').forEach(n => {
+        const w = n.closest('section.section');
+        if (w) {
+          const sec = getAllSections().find(s => 'sec-' + s.id === w.id);
+          if (sec) {
+            // Rebuild the section as editable
+            let newHTML;
+            if (sec.id === 'it')       newHTML = buildITSectionHTML(sec);
+            else if (sec.id === 'fac') newHTML = buildFacilitySectionHTML(sec);
+            else                       newHTML = buildStandardSectionHTML(sec);
+            const tmp = document.createElement('div');
+            tmp.innerHTML = newHTML.trim();
+            if (tmp.firstElementChild) w.replaceWith(tmp.firstElementChild);
+          }
+        }
+      });
+
+      // Add the orange "Editing archive entry" banner
+      const main = document.querySelector('main.main') || document.querySelector('.main');
+      if (main && !document.getElementById('archive-edit-banner')) {
+        const banner = document.createElement('div');
+        banner.id = 'archive-edit-banner';
+        banner.style.cssText = 'background:#FEF3C7;border:1px solid #FCD34D;color:#92400E;padding:12px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;line-height:1.55;display:flex;align-items:center;gap:12px;';
+        banner.innerHTML =
+          '<div style="font-size:18px">✏️</div>' +
+          '<div style="flex:1">' +
+            '<div style="font-weight:600;margin-bottom:2px">Editing archive entry — ' + escH(entry.week || '') + '</div>' +
+            '<div style="font-size:12px;opacity:.9">Use each section\'s <strong>Save</strong> button to update. Click <strong>Exit edit mode</strong> when done.</div>' +
+          '</div>' +
+          '<button onclick="_exitArchiveEdit()" style="background:#92400E;color:#FEF3C7;border:none;padding:8px 14px;border-radius:6px;font-weight:600;font-size:12px;cursor:pointer;font-family:inherit">Exit edit mode</button>';
+        main.insertBefore(banner, main.firstChild);
+
+        // Also restore the period label (openDash may have reset it)
+        const labelEl = document.getElementById(MODE_CFG.labelId);
+        if (labelEl && entry.week) labelEl.value = entry.week;
+      }
+
+      // After-paint refresh of the section-restore in case openDash ran
+      // collect/restore asynchronously and the sections need re-population.
+      if (typeof restore === 'function' && _pendingEditData) {
+        try { restore(_pendingEditData); } catch (e) {}
+      }
+    } catch (e) {
+      console.error('editEmbedded post-open setup failed', e);
+    }
+  }, 200);
+
   _showToast('📝 Editing: ' + (entry.week || 'archived report'), '#F59E0B');
 }
 
