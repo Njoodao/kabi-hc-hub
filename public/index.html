@@ -1268,9 +1268,11 @@ async function goHub() {
 // opens empty. If a non-empty draft exists, asks the user first.
 async function startNewReport(mode) {
   try {
+    // Check both LS and server drafts for existing content
     const draft = LS.get(mode);
+    let hasContent = false;
     if (draft && draft.week) {
-      const hasContent = Object.values(draft.secs || {}).some(s => {
+      hasContent = Object.values(draft.secs || {}).some(s => {
         if (!s) return false;
         return (s.kp && s.kp.length) ||
                (s.ac && s.ac.length) ||
@@ -1280,30 +1282,37 @@ async function startNewReport(mode) {
                (s.pr && s.pr.length) ||
                (s.p && s.p.trim());
       });
-      if (hasContent) {
-        const ok = confirm(
-          'There is an unsaved draft for "' + draft.week + '".\n\n' +
-          'Start a NEW empty update? (this will discard the draft)\n\n' +
-          'OK = Start new (empty form)\n' +
-          'Cancel = Continue editing the draft'
-        );
-        if (!ok) {
-          // User wants to keep working on the draft
-          await openDash(mode);
-          return;
-        }
+    }
+    if (hasContent) {
+      const ok = confirm(
+        'There is an unsaved draft for "' + draft.week + '".\n\n' +
+        'Start a NEW empty update? (this will discard the draft)\n\n' +
+        'OK = Start new (empty form)\n' +
+        'Cancel = Continue editing the draft'
+      );
+      if (!ok) {
+        // User wants to keep working on the draft → load draft normally
+        await openDash(mode);
+        return;
       }
     }
-    // Clear the LS draft and open empty
+    // Clear LS draft
     try { LS.clear(mode); } catch (e) {}
-    await openDash(mode);
+    // Clear server draft too (so fresh open doesn't repopulate from server)
+    if (_serverAvailable) {
+      try {
+        await fetchWithTimeout('/api/reports/' + mode, { method: 'DELETE' }, 5000);
+      } catch (e) { /* non-fatal */ }
+    }
+    // Open dashboard in fresh mode (skips loadSaved, no auto-period)
+    await openDash(mode, { fresh: true });
   } catch (err) {
     console.error('startNewReport failed', err);
     await openDash(mode);
   }
 }
 
-async function openDash(mode) {
+async function openDash(mode, opts) {
   CURRENT_MODE = mode;
   MODE_CFG = MODES[mode];
 
@@ -2018,7 +2027,7 @@ async function runExport(){
   // sub-title and continue the row numbering across slides.
   function KP(lbl, rows) {
     if (!rows?.length) return;
-    const PAGE = 6;
+    const PAGE = 5;
     const total = rows.length;
     for (let p = 0; p < total; p += PAGE) {
       const chunk = rows.slice(p, p + PAGE);
@@ -2134,7 +2143,7 @@ async function runExport(){
   }
   function CH(lbl, rows) {
     if (!rows?.length) return;
-    const PAGE = 6;
+    const PAGE = 5;
     const total = rows.length;
     for (let p = 0; p < total; p += PAGE) {
       const chunk = rows.slice(p, p + PAGE);
@@ -2158,7 +2167,7 @@ async function runExport(){
   }
   function NW(lbl, items) {
     if (!items?.length) return;
-    const PAGE = 6;
+    const PAGE = 5;
     const total = items.length;
     for (let p = 0; p < total; p += PAGE) {
       const chunk = items.slice(p, p + PAGE);
@@ -2314,7 +2323,7 @@ async function runExport(){
     }
     // ticket highlight (paginated at 6 per slide) — 4 columns
     if (it.tk?.length) {
-      const PAGE = 6;
+      const PAGE = 5;
       // Migrate any legacy 3-col rows on the fly
       const rows = it.tk.map(r => {
         if (Array.isArray(r) && r.length === 3) return [r[0]||'', r[2]||'', '', r[1]||''];
@@ -2350,7 +2359,7 @@ async function runExport(){
     const fac=D.secs.fac||{};
     DIV('Facility',fac.p);
     if (fac.tk?.length) {
-      const PAGE = 6;
+      const PAGE = 5;
       for (let p = 0; p < fac.tk.length; p += PAGE) {
         const chunk = fac.tk.slice(p, p + PAGE);
         const isCont = p > 0;
@@ -2486,9 +2495,10 @@ openDash = async function(mode) {
   const btn = document.querySelector('.' + MODE_CFG.modeBtnClass);
   if (btn) btn.classList.add('active');
 
-  // Load data from server
+  // Load data from server (skipped when opening fresh from Hub)
   restore(null);
-  let _savedData = await loadSaved();
+  const _isFresh = !!(opts && opts.fresh);
+  let _savedData = _isFresh ? null : await loadSaved();
   // Use pending edit data if available (from editEmbedded)
   if (_pendingEditData) {
     _savedData = _pendingEditData;
@@ -6957,7 +6967,7 @@ function buildFacilitySectionHTML(sec) {
     + '<div class="card" id="card-fac-pr"><div class="card-hdr"><span class="card-ttl">' + pl + ' Purchases</span>'
     + '<button class="card-dismiss" onclick="dismissCard(\'card-fac-pr\')" title="Remove">✕</button></div><div class="card-body"><div class="pg" id="fac-pg"></div>'
     + '<button class="add-row" onclick="aPC()">+ Add Box</button>'
-    + '<div class="pt">Total:<div class="ptv"><input id="fac-tot" class="ed" placeholder="0 SAR" readonly style="width:120px;text-align:center;background:#F0F4F8;color:#0A3260;font-weight:700;cursor:not-allowed" title="Auto-calculated from purchases below"/></div></div></div></div>'
+    + '<div class="pt">Total:<div class="ptv"><input id="fac-tot" class="ed" placeholder="0 SAR" readonly style="width:140px;text-align:center;background:#0A3260;color:#FFFFFF;font-weight:800;font-size:13px;border:none;border-radius:8px;padding:6px 10px;cursor:not-allowed;letter-spacing:.3px" title="Auto-calculated from purchases below"/></div></div></div></div>'
     + '<div class="card" id="card-fac-ch"><div class="card-hdr"><span class="card-ttl">Challenges</span><button class="btn btn-ghost btn-sm" onclick="aR(\'fac-ch\',1)">+ Row</button>'
     + '<button class="card-dismiss" onclick="dismissCard(\'card-fac-ch\')" title="Remove">✕</button></div>'
     + '<div class="card-body"><table class="tbl" id="fac-ch"><thead><tr><th style="width:48%">Challenge</th><th class="th-g">Action Required</th><th style="width:26px"></th></tr></thead><tbody></tbody></table>'
