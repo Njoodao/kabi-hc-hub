@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <meta name="kabi-version" content="KABi-HC-v31.2-20260610-1259">
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>KABi HC — Report Hub</title>
@@ -832,6 +833,33 @@ body.dash-active #dash-root {display:flex;flex-direction:column;min-height:100vh
   background: linear-gradient(135deg, #A7F3D0, #6EE7B7);
   border-color: #10B981;
 }
+
+/* Facility Total — high-specificity override (beats .ptv input) */
+.ptv:has(#fac-tot) {
+  background: transparent !important;
+  padding: 0 !important;
+}
+input#fac-tot {
+  background: #0A3260 !important;
+  color: #FFFFFF !important;
+  font-weight: 800 !important;
+  font-size: 14px !important;
+  font-family: inherit;
+  width: 150px !important;
+  text-align: center !important;
+  border: 2px solid #62C6D3 !important;
+  border-radius: 22px !important;
+  padding: 8px 14px !important;
+  cursor: not-allowed !important;
+  letter-spacing: 0.5px !important;
+  box-shadow: 0 2px 8px rgba(10, 50, 96, 0.25);
+}
+input#fac-tot::placeholder {
+  color: #B3CBE0 !important;
+  font-style: normal !important;
+  font-weight: 600 !important;
+  opacity: 0.85;
+}
 </style>
 </head>
 <body class="hub-active">
@@ -1352,6 +1380,7 @@ async function openDash(mode, opts) {
     if (_savedData) restore(_savedData);
   }
   setTimeout(() => _refreshSectionArchiveBadges(), 250);
+  setTimeout(() => { try { _wireFacilityPurchases(); } catch (e) {} }, 300);
   setTimeout(() => _checkPeriodArchive(), 300);
   setTimeout(() => { try { _checkEmptyMain(); } catch(e){} }, 600);
 
@@ -1499,10 +1528,37 @@ function _parseAmountStr(s) {
 
 // Format 5000 → "5,000 SAR"
 function _formatAmountStr(n) {
-  if (!isFinite(n) || n === 0) return '';
+  if (!isFinite(n)) return '';
+  if (n === 0) return '';  // empty → placeholder "0 SAR" shows
   return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' SAR';
 }
 
+
+// Wire up auto-recalc on any existing purchase boxes (e.g., after restore from older
+// data formats that did not include the oninput attribute).
+function _wireFacilityPurchases() {
+  const pg = document.getElementById('fac-pg');
+  if (!pg) return;
+  pg.querySelectorAll('.pc').forEach(box => {
+    const inputs = box.querySelectorAll('input.ed');
+    if (inputs.length >= 2) {
+      const amt = inputs[1];
+      if (!amt.dataset.facWired) {
+        amt.dataset.facWired = '1';
+        amt.addEventListener('input', _recalcFacilityTotal);
+      }
+    }
+    // Also re-wire the X button's recalc trigger
+    const xBtn = box.querySelector('button');
+    if (xBtn && !xBtn.dataset.facWired) {
+      xBtn.dataset.facWired = '1';
+      const origOnclick = xBtn.onclick;
+      xBtn.addEventListener('click', () => setTimeout(_recalcFacilityTotal, 50));
+    }
+  });
+  // Initial recalc
+  _recalcFacilityTotal();
+}
 function _recalcFacilityTotal() {
   const pg = document.getElementById('fac-pg');
   const tot = document.getElementById('fac-tot');
@@ -6967,7 +7023,7 @@ function buildFacilitySectionHTML(sec) {
     + '<div class="card" id="card-fac-pr"><div class="card-hdr"><span class="card-ttl">' + pl + ' Purchases</span>'
     + '<button class="card-dismiss" onclick="dismissCard(\'card-fac-pr\')" title="Remove">✕</button></div><div class="card-body"><div class="pg" id="fac-pg"></div>'
     + '<button class="add-row" onclick="aPC()">+ Add Box</button>'
-    + '<div class="pt">Total:<div class="ptv"><input id="fac-tot" class="ed" placeholder="0 SAR" readonly style="width:140px;text-align:center;background:#0A3260;color:#FFFFFF;font-weight:800;font-size:13px;border:none;border-radius:8px;padding:6px 10px;cursor:not-allowed;letter-spacing:.3px" title="Auto-calculated from purchases below"/></div></div></div></div>'
+    + '<div class="pt">Total:<div class="ptv"><input id="fac-tot" class="ed" placeholder="0 SAR" readonly title="Auto-calculated from purchases below"/></div></div></div></div>'
     + '<div class="card" id="card-fac-ch"><div class="card-hdr"><span class="card-ttl">Challenges</span><button class="btn btn-ghost btn-sm" onclick="aR(\'fac-ch\',1)">+ Row</button>'
     + '<button class="card-dismiss" onclick="dismissCard(\'card-fac-ch\')" title="Remove">✕</button></div>'
     + '<div class="card-body"><table class="tbl" id="fac-ch"><thead><tr><th style="width:48%">Challenge</th><th class="th-g">Action Required</th><th style="width:26px"></th></tr></thead><tbody></tbody></table>'
