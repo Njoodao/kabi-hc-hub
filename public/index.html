@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta name="kabi-version" content="KABi-HC-v31.2-20260610-1259">
+  <meta name="kabi-version" content="KABi-HC-v31.4-20260610-1328">
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>KABi HC — Report Hub</title>
@@ -1340,7 +1340,7 @@ async function startNewReport(mode) {
   }
 }
 
-async function openDash(mode, opts) {
+async function openDash(mode, opts = {}) {
   CURRENT_MODE = mode;
   MODE_CFG = MODES[mode];
 
@@ -2514,7 +2514,7 @@ async function runExport(){
 
 // ── PATCHED openDash: uses dynamic sections ──
 const _origOpenDash = openDash;
-openDash = async function(mode) {
+openDash = async function(mode, opts = {}) {
   try {
   CURRENT_MODE = mode;
   MODE_CFG = MODES[mode];
@@ -2553,7 +2553,7 @@ openDash = async function(mode) {
 
   // Load data from server (skipped when opening fresh from Hub)
   restore(null);
-  const _isFresh = !!(opts && opts.fresh);
+  const _isFresh = !!(typeof opts !== "undefined" && opts && opts.fresh);
   let _savedData = _isFresh ? null : await loadSaved();
   // Use pending edit data if available (from editEmbedded)
   if (_pendingEditData) {
