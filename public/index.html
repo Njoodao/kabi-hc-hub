@@ -787,6 +787,19 @@ body.dash-active #dash-root {display:flex;flex-direction:column;min-height:100vh
 .restore-btn-submit { padding: 10px 18px; background: linear-gradient(135deg, #62C6D3, #4FB3C2); border: none; border-radius: 8px; cursor: pointer; font-weight: 700; font-size: 13px; color: #fff; }
 .restore-btn-submit:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(98,198,211,.4); }
 .restore-btn-submit:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
+
+.restore-add-new { margin-top: 8px; background: #fff; border: 1px dashed #62C6D3; color: #0E7488; padding: 7px 14px; border-radius: 7px; cursor: pointer; font-size: 12.5px; font-weight: 600; font-family: inherit; }
+.restore-add-new:hover { background: #F0FAFC; border-color: #4AAEBA; }
+.restore-results { margin-top: 16px; padding: 12px; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; max-height: 200px; overflow-y: auto; }
+.restore-result-row { padding: 6px 0; border-bottom: 1px solid #EAEAEA; font-size: 12px; line-height: 1.45; }
+.restore-result-row:last-child { border-bottom: none; }
+.restore-result-row.ok { color: #047857; }
+.restore-result-row.skip { color: #92400E; }
+.restore-result-row.fail { color: #B91C1C; }
+.restore-result-name { font-weight: 600; }
+.side-drag { cursor: grab; }
+.side-drag:active { cursor: grabbing; }
+.side-item-wrap[draggable="true"]:hover .side-drag { color: #62C6D3; }
 </style>
 </head>
 <body class="hub-active">
@@ -2929,7 +2942,84 @@ function _restoreModalUpdate() {
   if (lbl) {
     lbl.textContent = (metaSel === 'manual' ? '4' : '3') + '. Choose ' + (modeSel === 'multi' ? 'files' : 'file');
   }
+  // Initialize / refresh period dropdowns
+  _restorePeriodUpdate();
 }
+
+// ─── Period dropdowns — mode-aware (Weekly/Monthly/Quarterly) ──────
+function _restorePeriodUpdate() {
+  const modeEl = document.getElementById('r-mode-sel');
+  const target = document.getElementById('r-period-pickers');
+  if (!modeEl || !target) return;
+  const mode = modeEl.value;
+  const curYear = new Date().getFullYear();
+  const years = [curYear - 1, curYear, curYear + 1];
+  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const weeks = ['1st Week','2nd Week','3rd Week','4th Week','5th Week'];
+  const quarters = ['Q1','Q2','Q3','Q4'];
+
+  const monthOpts = months.map(m => `<option value="${m}">${m}</option>`).join('');
+  const yearOpts = years.map(y => `<option value="${y}"${y === curYear ? ' selected' : ''}>${y}</option>`).join('');
+
+  let html = '';
+  if (mode === 'weekly') {
+    const weekOpts = weeks.map(w => `<option value="${w}">${w}</option>`).join('');
+    html = `<select id="r-week" class="restore-input" onchange="_restorePeriodPreview()">${weekOpts}</select>` +
+           `<select id="r-month" class="restore-input" onchange="_restorePeriodPreview()">${monthOpts}</select>` +
+           `<select id="r-year" class="restore-input" onchange="_restorePeriodPreview()">${yearOpts}</select>`;
+  } else if (mode === 'monthly') {
+    html = `<select id="r-month" class="restore-input" onchange="_restorePeriodPreview()">${monthOpts}</select>` +
+           `<select id="r-year" class="restore-input" onchange="_restorePeriodPreview()">${yearOpts}</select>`;
+  } else if (mode === 'quarterly') {
+    const qOpts = quarters.map(q => `<option value="${q}">${q}</option>`).join('');
+    html = `<select id="r-quarter" class="restore-input" onchange="_restorePeriodPreview()">${qOpts}</select>` +
+           `<select id="r-year" class="restore-input" onchange="_restorePeriodPreview()">${yearOpts}</select>`;
+  }
+  target.innerHTML = html;
+  _restorePeriodPreview();
+}
+
+function _restorePeriodPreview() {
+  const modeEl = document.getElementById('r-mode-sel');
+  const preview = document.getElementById('r-period-preview');
+  if (!modeEl || !preview) return;
+  const mode = modeEl.value;
+  let label = '';
+  if (mode === 'weekly') {
+    const w = document.getElementById('r-week')?.value || '';
+    const m = document.getElementById('r-month')?.value || '';
+    const y = document.getElementById('r-year')?.value || '';
+    if (w && m && y) label = `${w}, ${m} ${y}`;
+  } else if (mode === 'monthly') {
+    const m = document.getElementById('r-month')?.value || '';
+    const y = document.getElementById('r-year')?.value || '';
+    if (m && y) label = `${m} ${y}`;
+  } else if (mode === 'quarterly') {
+    const q = document.getElementById('r-quarter')?.value || '';
+    const y = document.getElementById('r-year')?.value || '';
+    if (q && y) label = `${q} ${y}`;
+  }
+  preview.textContent = label ? `→ Period: ${label}` : '';
+  return label;
+}
+
+function _restoreGetPeriod() {
+  return _restorePeriodPreview();
+}
+
+// ─── + New custom section in 3b ──────────────────────────────────
+function _restoreAddNewSection() {
+  const container = document.getElementById('r-sections');
+  if (!container) return;
+  const name = (prompt('Section name (e.g., Transformation, Procurement, …)') || '').trim();
+  if (!name) return;
+  const id = 'custom_' + name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') + '_' + Math.random().toString(36).slice(2, 6);
+  const lbl = document.createElement('label');
+  lbl.className = 'restore-chk';
+  lbl.innerHTML = `<input type="checkbox" value="${id}" data-name="${name}" data-newsection="1" checked/> ${name}`;
+  container.appendChild(lbl);
+}
+
 
 async function _restoreModalSubmit() {
   try {
@@ -2944,28 +3034,49 @@ async function _restoreModalSubmit() {
     let override = null;
     if (metaSel === 'manual') {
       const mode = document.getElementById('r-mode-sel').value;
-      const period = document.getElementById('r-period').value.trim();
+      const period = _restoreGetPeriod();
       if (!period) {
-        document.getElementById('r-file-status').textContent = '⚠ Please enter a period (e.g., May 2026).';
+        document.getElementById('r-file-status').textContent = '⚠ Please complete the period dropdowns.';
         return;
       }
-      const secs = Array.from(document.querySelectorAll('#r-sections input[type="checkbox"]:checked')).map(c => c.value);
-      override = { mode, period, secs };
+      const checked = Array.from(document.querySelectorAll('#r-sections input[type="checkbox"]:checked'));
+      const secs = checked.map(c => c.value);
+      // Collect new custom sections to register
+      const newCustom = checked.filter(c => c.dataset.newsection === '1').map(c => ({
+        id: c.value, name: c.dataset.name || c.value, badge: '★', color: '#62C6D3', builtin: false
+      }));
+      override = { mode, period, secs, newCustom };
     }
 
     document.getElementById('r-file-status').textContent = '⏳ Restoring…';
+    document.getElementById('r-results').style.display = 'none';
     const result = await _restorePPTFiles(files, override);
     let msg = '';
     if (result.restored) msg += '✅ Restored ' + result.restored + ' entries';
     if (result.skipped)  msg += (msg ? ' · ' : '') + '⏭ Skipped ' + result.skipped;
     if (result.failed)   msg += (msg ? ' · ' : '') + '⚠ Failed ' + result.failed;
     document.getElementById('r-file-status').textContent = msg || 'Done.';
+
+    // Render per-file details in the result panel
+    const resultsEl = document.getElementById('r-results');
+    if (result.details && result.details.length) {
+      let html = '';
+      result.details.forEach(d => {
+        let cls = 'fail', icon = '⚠';
+        if (d.status === 'restored') { cls = 'ok'; icon = '✓'; }
+        else if (d.status === 'skipped') { cls = 'skip'; icon = '⏭'; }
+        const detail = d.reason || (d.sections ? ('Sections: ' + d.sections.join(', ')) : '');
+        html += `<div class="restore-result-row ${cls}">${icon} <span class="restore-result-name">${(d.name || '').replace(/[<>]/g, '')}</span>` +
+                (detail ? ` — ${(detail).replace(/[<>]/g, '')}` : '') + '</div>';
+      });
+      resultsEl.innerHTML = html;
+      resultsEl.style.display = 'block';
+    }
+
     _showToast(msg || 'Done.');
     if (result.restored > 0) {
-      setTimeout(() => {
-        closeRestoreModal();
-        if (typeof searchArchive === 'function') searchArchive();
-      }, 800);
+      // Keep modal open briefly so user sees results, then refresh archive list in background
+      if (typeof searchArchive === 'function') setTimeout(searchArchive, 600);
     }
   } catch (err) {
     console.error('Restore submit failed', err);
@@ -2982,7 +3093,7 @@ async function _restorePPTFiles(files, override) {
   for (const file of files) {
     try {
       if (!file.name.toLowerCase().endsWith('.pptx')) {
-        stats.failed++; stats.details.push({ name: file.name, reason: 'Not a .pptx file' });
+        stats.failed++; stats.details.push({ name: file.name, reason: 'Not a .pptx file', status: 'failed' });
         continue;
       }
       const buf = await file.arrayBuffer();
@@ -3006,11 +3117,11 @@ async function _restorePPTFiles(files, override) {
       }
 
       if (!meta || !meta.period || !meta.mode) {
-        stats.failed++; stats.details.push({ name: file.name, reason: 'No KABi metadata in file and no override provided' });
+        stats.failed++; stats.details.push({ name: file.name, reason: 'No KABi metadata in file. Re-export from the dashboard, or use Manual mode with a section that contains data.', status: 'failed' });
         continue;
       }
       if (!meta.secs || !Object.keys(meta.secs).length) {
-        stats.failed++; stats.details.push({ name: file.name, reason: 'No sections selected / found' });
+        stats.failed++; stats.details.push({ name: file.name, reason: 'No matching sections found in the file (the selected section(s) are missing from the file metadata). Try Auto-detect to see what sections the file contains.', status: 'failed' });
         continue;
       }
 
@@ -3036,7 +3147,7 @@ async function _restorePPTFiles(files, override) {
           conflictingSections.join(', ') + '\n\nReplace existing section data from "' + file.name + '"?'
         );
         if (!ok) {
-          stats.skipped++; stats.details.push({ name: file.name, reason: 'User skipped conflict' });
+          stats.skipped++; stats.details.push({ name: file.name, reason: 'User skipped conflict', status: 'skipped' });
           continue;
         }
       }
@@ -3081,8 +3192,8 @@ async function _restorePPTFiles(files, override) {
 
       if (saved) {
         stats.restored++;
-        stats.details.push({ name: file.name, period: meta.period, mode: meta.mode, sections: Object.keys(meta.secs) });
-        // Propagate custom sections to the dashboard
+        stats.details.push({ name: file.name, period: meta.period, mode: meta.mode, sections: Object.keys(meta.secs), status: 'restored', reason: 'Saved ' + Object.keys(meta.secs).length + ' section(s) to ' + meta.period + ' (' + meta.mode + ')' });
+        // Propagate custom sections to the dashboard (from file metadata)
         if (Array.isArray(meta._customSections)) {
           const have = new Set(_customSections.map(s => s.id));
           meta._customSections.forEach(cs => {
@@ -3093,12 +3204,23 @@ async function _restorePPTFiles(files, override) {
           });
           try { _safeStorage.setItem('kabi_custom_sections', JSON.stringify(_customSections)); } catch (e) {}
         }
+        // Also propagate any NEW custom sections requested via the modal
+        if (override && Array.isArray(override.newCustom) && override.newCustom.length) {
+          const have2 = new Set(_customSections.map(s => s.id));
+          override.newCustom.forEach(cs => {
+            if (cs && cs.id && !have2.has(cs.id)) {
+              _customSections.push(cs);
+              have2.add(cs.id);
+            }
+          });
+          try { _safeStorage.setItem('kabi_custom_sections', JSON.stringify(_customSections)); } catch (e) {}
+        }
       } else {
-        stats.failed++; stats.details.push({ name: file.name, reason: 'Save failed' });
+        stats.failed++; stats.details.push({ name: file.name, reason: 'Save failed — server unreachable and local storage rejected the entry', status: 'failed' });
       }
     } catch (err) {
       console.error('Restore file failed:', file?.name, err);
-      stats.failed++; stats.details.push({ name: file.name, reason: String(err.message || err) });
+      stats.failed++; stats.details.push({ name: file.name, reason: String(err.message || err), status: 'failed' });
     }
   }
 
@@ -6009,7 +6131,7 @@ function buildStandardSectionHTML(sec) {
   let html = '<div class="section" id="sec-' + sec.id + '">'
     + '<div class="sec-hdr"><div class="sec-left"><div class="sec-badge" style="background:' + sec.color + '">' + sec.badge + '</div>'
     + '<div><div class="sec-name">' + sec.name + '</div>'
-    + '<div class="prow">Presenter:<input class="p-inp" data-s="' + sec.id + '" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + sec.id + '" onclick="regenerateSectionFromSource(\'' + sec.id + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg> Generate</button><button class="sec-clear-btn" data-sec="' + sec.id + '" onclick="clearSection(\'' + sec.id + '\')" title="Clear section data"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"vertical-align:-2px\"><polyline points=\"3 6 5 6 21 6\"/><path d=\"M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6\"/></svg> Clear</button><button class="sec-rename-btn" data-sec="' + sec.id + '" onclick="renameSection(\'' + sec.id + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-del-btn" data-sec="' + sec.id + '" onclick="deleteSection(\'' + sec.id + '\')" title="Delete this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Delete</button><button class="sec-save-btn" data-sec="' + sec.id + '" onclick="saveSectionToArchive(\'' + sec.id + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : (CURRENT_MODE === 'weekly' ? '<button class="sec-rename-btn" data-sec="' + sec.id + '" onclick="renameSection(\'' + sec.id + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-del-btn" data-sec="' + sec.id + '" onclick="deleteSection(\'' + sec.id + '\')" title="Delete this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Delete</button><button class="sec-save-btn" data-sec="' + sec.id + '" onclick="saveSectionToArchive(\'' + sec.id + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : '')) + '</div>'
+    + '<div class="prow">Presenter:<input class="p-inp" data-s="' + sec.id + '" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + sec.id + '" onclick="regenerateSectionFromSource(\'' + sec.id + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg> Generate</button><button class="sec-clear-btn" data-sec="' + sec.id + '" onclick="clearSection(\'' + sec.id + '\')" title="Clear section data"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"vertical-align:-2px\"><polyline points=\"3 6 5 6 21 6\"/><path d=\"M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6\"/></svg> Clear</button><button class="sec-rename-btn" data-sec="' + sec.id + '" onclick="renameSection(\'' + sec.id + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-clear-btn" data-sec="' + sec.id + '" onclick="clearSection(\'' + sec.id + '\')" title="Clear section content"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Clear</button><button class="sec-save-btn" data-sec="' + sec.id + '" onclick="saveSectionToArchive(\'' + sec.id + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : (CURRENT_MODE === 'weekly' ? '<button class="sec-rename-btn" data-sec="' + sec.id + '" onclick="renameSection(\'' + sec.id + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-clear-btn" data-sec="' + sec.id + '" onclick="clearSection(\'' + sec.id + '\')" title="Clear section content"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Clear</button><button class="sec-save-btn" data-sec="' + sec.id + '" onclick="saveSectionToArchive(\'' + sec.id + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : '')) + '</div>'
     + '<div class="sec-progress" data-s="' + sec.id + '" style="display:none"><span class="sec-progress-label">0 of 0 tasks completed</span><div class="sec-progress-bar"><div class="sec-progress-fill" style="width:0"></div></div><span class="sec-progress-pct">0%</span></div>'
     // Key Points — NO dismiss button
     + '<div class="card"><div class="card-hdr"><span class="card-ttl">Key Points</span><button class="btn btn-ghost btn-sm" onclick="aR(\'' + sec.id + '-kp\')">+ Row</button></div>'
@@ -6265,7 +6387,7 @@ function buildITSectionHTML(sec) {
   return '<div class="section" id="sec-it">'
     + '<div class="sec-hdr"><div class="sec-left"><div class="sec-badge" style="background:var(--teal-dk)">' + sec.badge + '</div>'
     + '<div><div class="sec-name">Information Technology</div>'
-    + '<div class="prow">Presenter:<input class="p-inp" data-s="it" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + 'it' + '" onclick="regenerateSectionFromSource(\'' + 'it' + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg> Generate</button><button class="sec-clear-btn" data-sec="' + 'it' + '" onclick="clearSection(\'' + 'it' + '\')" title="Clear section data"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"vertical-align:-2px\"><polyline points=\"3 6 5 6 21 6\"/><path d=\"M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6\"/></svg> Clear</button><button class="sec-rename-btn" data-sec="' + 'it' + '" onclick="renameSection(\'' + 'it' + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-del-btn" data-sec="' + 'it' + '" onclick="deleteSection(\'' + 'it' + '\')" title="Delete this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Delete</button><button class="sec-save-btn" data-sec="' + 'it' + '" onclick="saveSectionToArchive(\'' + 'it' + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : (CURRENT_MODE === 'weekly' ? '<button class="sec-rename-btn" data-sec="' + 'it' + '" onclick="renameSection(\'' + 'it' + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-del-btn" data-sec="' + 'it' + '" onclick="deleteSection(\'' + 'it' + '\')" title="Delete this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Delete</button><button class="sec-save-btn" data-sec="' + 'it' + '" onclick="saveSectionToArchive(\'' + 'it' + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : '')) + '</div>'
+    + '<div class="prow">Presenter:<input class="p-inp" data-s="it" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + 'it' + '" onclick="regenerateSectionFromSource(\'' + 'it' + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg> Generate</button><button class="sec-clear-btn" data-sec="' + 'it' + '" onclick="clearSection(\'' + 'it' + '\')" title="Clear section data"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"vertical-align:-2px\"><polyline points=\"3 6 5 6 21 6\"/><path d=\"M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6\"/></svg> Clear</button><button class="sec-rename-btn" data-sec="' + 'it' + '" onclick="renameSection(\'' + 'it' + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-clear-btn" data-sec="' + 'it' + '" onclick="clearSection(\'' + 'it' + '\')" title="Clear section content"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Clear</button><button class="sec-save-btn" data-sec="' + 'it' + '" onclick="saveSectionToArchive(\'' + 'it' + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : (CURRENT_MODE === 'weekly' ? '<button class="sec-rename-btn" data-sec="' + 'it' + '" onclick="renameSection(\'' + 'it' + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-clear-btn" data-sec="' + 'it' + '" onclick="clearSection(\'' + 'it' + '\')" title="Clear section content"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Clear</button><button class="sec-save-btn" data-sec="' + 'it' + '" onclick="saveSectionToArchive(\'' + 'it' + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : '')) + '</div>'
     + '<div class="card" id="card-it-stats"><div class="card-hdr"><span class="card-ttl">Support Tickets — ' + pl + ' Data</span>'
     + '<button class="card-dismiss" onclick="dismissCard(\'card-it-stats\')" title="Remove">✕</button></div>'
     + '<div class="card-body"><div class="srow" id="it-stats-boxes"><div class="st s0"><div class="stnum">0</div><div class="stlbl">Total Tickets</div></div></div>'
@@ -6296,7 +6418,7 @@ function buildFacilitySectionHTML(sec) {
   return '<div class="section" id="sec-fac">'
     + '<div class="sec-hdr"><div class="sec-left"><div class="sec-badge" style="background:#1B2631">' + sec.badge + '</div>'
     + '<div><div class="sec-name">Facility</div>'
-    + '<div class="prow">Presenter:<input class="p-inp" data-s="fac" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + 'fac' + '" onclick="regenerateSectionFromSource(\'' + 'fac' + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg> Generate</button><button class="sec-clear-btn" data-sec="' + 'fac' + '" onclick="clearSection(\'' + 'fac' + '\')" title="Clear section data"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"vertical-align:-2px\"><polyline points=\"3 6 5 6 21 6\"/><path d=\"M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6\"/></svg> Clear</button><button class="sec-rename-btn" data-sec="' + 'fac' + '" onclick="renameSection(\'' + 'fac' + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-del-btn" data-sec="' + 'fac' + '" onclick="deleteSection(\'' + 'fac' + '\')" title="Delete this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Delete</button><button class="sec-save-btn" data-sec="' + 'fac' + '" onclick="saveSectionToArchive(\'' + 'fac' + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : (CURRENT_MODE === 'weekly' ? '<button class="sec-rename-btn" data-sec="' + 'fac' + '" onclick="renameSection(\'' + 'fac' + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-del-btn" data-sec="' + 'fac' + '" onclick="deleteSection(\'' + 'fac' + '\')" title="Delete this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Delete</button><button class="sec-save-btn" data-sec="' + 'fac' + '" onclick="saveSectionToArchive(\'' + 'fac' + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : '')) + '</div>'
+    + '<div class="prow">Presenter:<input class="p-inp" data-s="fac" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + 'fac' + '" onclick="regenerateSectionFromSource(\'' + 'fac' + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg> Generate</button><button class="sec-clear-btn" data-sec="' + 'fac' + '" onclick="clearSection(\'' + 'fac' + '\')" title="Clear section data"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"vertical-align:-2px\"><polyline points=\"3 6 5 6 21 6\"/><path d=\"M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6\"/></svg> Clear</button><button class="sec-rename-btn" data-sec="' + 'fac' + '" onclick="renameSection(\'' + 'fac' + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-clear-btn" data-sec="' + 'fac' + '" onclick="clearSection(\'' + 'fac' + '\')" title="Clear section content"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Clear</button><button class="sec-save-btn" data-sec="' + 'fac' + '" onclick="saveSectionToArchive(\'' + 'fac' + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : (CURRENT_MODE === 'weekly' ? '<button class="sec-rename-btn" data-sec="' + 'fac' + '" onclick="renameSection(\'' + 'fac' + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-clear-btn" data-sec="' + 'fac' + '" onclick="clearSection(\'' + 'fac' + '\')" title="Clear section content"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Clear</button><button class="sec-save-btn" data-sec="' + 'fac' + '" onclick="saveSectionToArchive(\'' + 'fac' + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : '')) + '</div>'
     + '<div class="card" id="card-fac-tk"><div class="card-hdr"><span class="card-ttl">Facility Tickets</span><button class="btn btn-ghost btn-sm" onclick="aR(\'fac-tk\',0,3)">+ Row</button>'
     + '<button class="card-dismiss" onclick="dismissCard(\'card-fac-tk\')" title="Remove">✕</button></div>'
     + '<div class="card-body"><table class="tbl" id="fac-tk"><thead><tr><th style="width:20%">Category</th><th>Description</th><th style="width:13%" class="th-g">Status</th><th style="width:26px"></th></tr></thead><tbody></tbody></table>'
@@ -6809,13 +6931,14 @@ document.addEventListener('keydown', (e) => {
       <div class="restore-field" id="r-manual-fields" style="display:none">
         <label class="restore-label">3a. Period</label>
         <div class="restore-row">
-          <select id="r-mode-sel" class="restore-input">
+          <select id="r-mode-sel" class="restore-input" onchange="_restorePeriodUpdate()">
             <option value="weekly">Weekly</option>
             <option value="monthly" selected>Monthly</option>
             <option value="quarterly">Quarterly</option>
           </select>
-          <input id="r-period" class="restore-input" placeholder="e.g., May 2026"/>
         </div>
+        <div class="restore-row" id="r-period-pickers" style="margin-top:8px"></div>
+        <div class="restore-hint" id="r-period-preview" style="margin-top:6px"></div>
         <label class="restore-label" style="margin-top:12px">3b. Section(s)</label>
         <div class="restore-sections" id="r-sections">
           <label class="restore-chk"><input type="checkbox" value="ops"/> Operations</label>
@@ -6825,7 +6948,8 @@ document.addEventListener('keydown', (e) => {
           <label class="restore-chk"><input type="checkbox" value="it"/> Information Technology</label>
           <label class="restore-chk"><input type="checkbox" value="fac"/> Facility</label>
         </div>
-        <div class="restore-hint">If selected, only these sections are saved from the file. Otherwise all sections in the file are saved.</div>
+        <button class="restore-add-new" onclick="_restoreAddNewSection()" type="button">+ New section</button>
+        <div class="restore-hint">If selected, only these sections are saved from the file. Otherwise all sections in the file are saved. Use "+ New section" to add a custom section name (created on restore).</div>
       </div>
 
       <div class="restore-field">
@@ -6833,6 +6957,7 @@ document.addEventListener('keydown', (e) => {
         <input type="file" id="r-file-input" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" class="restore-file"/>
         <div id="r-file-status" class="restore-hint"></div>
       </div>
+      <div id="r-results" class="restore-results" style="display:none"></div>
 
     </div>
     <div class="restore-modal-ftr">
