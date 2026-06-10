@@ -800,6 +800,38 @@ body.dash-active #dash-root {display:flex;flex-direction:column;min-height:100vh
 .side-drag { cursor: grab; }
 .side-drag:active { cursor: grabbing; }
 .side-item-wrap[draggable="true"]:hover .side-drag { color: #62C6D3; }
+
+.sec-archive-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  font-size: 11.5px;
+  background: linear-gradient(135deg, #FEF3C7, #FCD34D33);
+  color: #92400E;
+  border: 1px solid #FCD34D;
+  border-radius: 999px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+  line-height: 1.4;
+}
+.sec-archive-badge:hover {
+  background: linear-gradient(135deg, #FDE68A, #FCD34D);
+  border-color: #F59E0B;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.25);
+}
+.sec-archive-badge.editing {
+  background: linear-gradient(135deg, #D1FAE5, #6EE7B733);
+  color: #065F46;
+  border-color: #6EE7B7;
+}
+.sec-archive-badge.editing:hover {
+  background: linear-gradient(135deg, #A7F3D0, #6EE7B7);
+  border-color: #10B981;
+}
 </style>
 </head>
 <body class="hub-active">
@@ -1253,7 +1285,7 @@ async function openDash(mode) {
     const labelEl = document.getElementById(MODE_CFG.labelId);
     if (labelEl && !labelEl.dataset.periodChangeBound) {
       labelEl.dataset.periodChangeBound = '1';
-      labelEl.addEventListener('change', () => _checkPeriodArchive());
+      labelEl.addEventListener('change', () => { _checkPeriodArchive(); _refreshSectionArchiveBadges(); });
     }
   }, 100);
 
@@ -1270,6 +1302,7 @@ async function openDash(mode) {
     const _savedData = await loadSaved();
     if (_savedData) restore(_savedData);
   }
+  setTimeout(() => _refreshSectionArchiveBadges(), 250);
   setTimeout(() => _checkPeriodArchive(), 300);
   setTimeout(() => { try { _checkEmptyMain(); } catch(e){} }, 600);
 
@@ -1783,9 +1816,9 @@ async function doSave() {
     // to avoid silently mixing data from unrelated periods.
 
     if (ok && _serverAvailable) {
-      _showToast('✦ Saved & Synced');
+      _showToast('✦ Saved & Synced'); setTimeout(() => _refreshSectionArchiveBadges(), 200);;
     } else {
-      _showToast('✦ Saved locally');
+      _showToast('✦ Saved locally'); setTimeout(() => _refreshSectionArchiveBadges(), 200);;
     }
   } catch(e) {
     console.error('Save error:', e);
@@ -2370,7 +2403,7 @@ openDash = async function(mode) {
     const labelEl = document.getElementById(MODE_CFG.labelId);
     if (labelEl && !labelEl.dataset.periodChangeBound) {
       labelEl.dataset.periodChangeBound = '1';
-      labelEl.addEventListener('change', () => _checkPeriodArchive());
+      labelEl.addEventListener('change', () => { _checkPeriodArchive(); _refreshSectionArchiveBadges(); });
     }
   }, 100);
 
@@ -2878,6 +2911,208 @@ async function exportArchiveAsPPTs() {
 }
 
 
+
+// ── Slide-content parser: extract section data from PPT slides when no
+//    KABi metadata is present. Best-effort — handles standard KABi PPT
+//    layout (DIV slides + KP/AC/CH/NW slides per section).
+async function _parseSlidesForSections(zip, wantedSecIds) {
+  // Map of section name (from DIV slide) → section id
+  const NAME_TO_ID = {
+    'operations': 'ops',
+    'hc development': 'hcdev',
+    'hc dev': 'hcdev',
+    'human capital development': 'hcdev',
+    'internal communication': 'ic',
+    'internal comms': 'ic',
+    'talent acquisition': 'ta',
+    'information technology': 'it',
+    'it': 'it',
+    'facility': 'fac',
+    'transformation': 'transformation'
+  };
+
+  // Map id → name fallback for custom IDs
+  const wantedSet = new Set(wantedSecIds);
+  const out = {}; // sid → { p, kp, ac, ch, nw }
+
+  // Decode helper
+  const decode = s => s
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+
+  // Get text from a slide xml: returns concatenated runs grouped per <p>
+  const getSlideRuns = (xml) => {
+    const paragraphs = [];
+    // Each <a:p> contains zero+ <a:r><a:t>...</a:t></a:r>
+    const pRe = /<a:p[^>]*>([\s\S]*?)<\/a:p>/g;
+    let pm;
+    while ((pm = pRe.exec(xml)) !== null) {
+      const inner = pm[1];
+      const tRe = /<a:t[^>]*>([\s\S]*?)<\/a:t>/g;
+      const parts = [];
+      let tm;
+      while ((tm = tRe.exec(inner)) !== null) parts.push(decode(tm[1]));
+      const text = parts.join('').trim();
+      if (text) paragraphs.push(text);
+    }
+    return paragraphs;
+  };
+
+  // List all slide XML files in order (slide1.xml, slide2.xml, ...)
+  const slideFiles = Object.keys(zip.files)
+    .filter(k => /^ppt\/slides\/slide\d+\.xml$/.test(k))
+    .sort((a, b) => {
+      const na = parseInt(a.match(/slide(\d+)\.xml/)[1], 10);
+      const nb = parseInt(b.match(/slide(\d+)\.xml/)[1], 10);
+      return na - nb;
+    });
+
+  // Walk slides, tracking the "current section"
+  let currentSid = null;
+  const sliceOff = ['KABi', 'Confidential', 'Internal Use Only', 'Presented by'];
+  const HEADERS = new Set(['TASK', 'STATUS', 'DETAILS', 'CHALLENGE', 'ACTION REQUIRED', 'AGENDA']);
+
+  for (const sf of slideFiles) {
+    let xml;
+    try { xml = await zip.file(sf).async('string'); } catch (e) { continue; }
+    const runs = getSlideRuns(xml);
+    if (!runs.length) continue;
+
+    // Detect DIV slide: short list of runs, usually contains the bold section name.
+    // The big text from the export is at fontSize 34 — we can't read font size,
+    // so we use heuristic: first non-KABi/Confidential paragraph that matches a
+    // known section name (full or prefix).
+    const firstMeaningful = runs.find(r => !sliceOff.some(o => r.startsWith(o)));
+    if (firstMeaningful) {
+      const norm = firstMeaningful.toLowerCase().replace(/\s+/g, ' ').replace(/&/g, '').replace(/\./g, '').trim();
+      // Try direct match first
+      let matchedId = null;
+      for (const [key, id] of Object.entries(NAME_TO_ID)) {
+        if (norm === key || norm.startsWith(key + ' ') || norm === key.replace('&', '').trim()) {
+          matchedId = id; break;
+        }
+      }
+      // Also try matching against custom section ids (anything in wantedSet)
+      if (!matchedId) {
+        for (const sid of wantedSet) {
+          // For custom sections like "transformation_xxx", check if the run includes the readable part
+          const parts = sid.split('_');
+          for (const part of parts) {
+            if (part.length > 3 && norm.includes(part.toLowerCase())) { matchedId = sid; break; }
+          }
+          if (matchedId) break;
+        }
+      }
+      if (matchedId && wantedSet.has(matchedId)) {
+        currentSid = matchedId;
+        if (!out[currentSid]) out[currentSid] = { p: '', kp: [], ac: [], ch: [], nw: [] };
+        // Grab presenter if present
+        const pIdx = runs.findIndex(r => r.startsWith('Presented by'));
+        if (pIdx >= 0) {
+          const pres = runs[pIdx].replace(/^Presented by\s+/, '').trim();
+          if (pres && pres !== '—') out[currentSid].p = pres;
+        }
+        continue; // Don't try to parse content from a DIV slide
+      }
+    }
+
+    if (!currentSid) continue;
+
+    const target = out[currentSid];
+    if (!target) continue;
+
+    // Detect slide type by examining headers
+    const hasTaskHeader   = runs.includes('TASK')   || runs.some(r => r === 'TASK');
+    const hasStatusHeader = runs.includes('STATUS');
+    const hasDetailsHeader= runs.includes('DETAILS');
+    const hasChallengeHeader = runs.includes('CHALLENGE');
+    const isAgenda = runs.some(r => /^Agenda$/i.test(r) || /agenda/i.test(r));
+    if (isAgenda) continue;
+
+    // ── KP slide: TASK + STATUS + DETAILS columns
+    if (hasTaskHeader && hasStatusHeader) {
+      // Filter out header words + standard chrome (KABi, Confidential, page numbers)
+      const cells = runs.filter(r =>
+        !HEADERS.has(r) &&
+        !sliceOff.some(o => r.startsWith(o)) &&
+        !/^(continued)$/i.test(r) &&
+        !/^Key Points/i.test(r)
+      );
+      // Cells come in triples (task, status, details). The TASK starts with "N. "
+      // Group by detecting the leading number pattern.
+      let i = 0;
+      while (i < cells.length) {
+        if (/^\d+\.\s/.test(cells[i])) {
+          const task = cells[i].replace(/^\d+\.\s+/, '').trim();
+          const status = cells[i + 1] || '';
+          const details = cells[i + 2] || '';
+          target.kp.push([task, status, details]);
+          i += 3;
+        } else {
+          i += 1;
+        }
+      }
+      continue;
+    }
+
+    // ── CH slide: CHALLENGE + ACTION REQUIRED columns
+    if (hasChallengeHeader) {
+      const cells = runs.filter(r =>
+        !HEADERS.has(r) &&
+        !sliceOff.some(o => r.startsWith(o)) &&
+        !/^(continued)$/i.test(r) &&
+        !/Challenges & Actions/i.test(r)
+      );
+      let i = 0;
+      while (i < cells.length) {
+        if (/^\d+\.\s/.test(cells[i])) {
+          const ch = cells[i].replace(/^\d+\.\s+/, '').trim();
+          const ac = cells[i + 1] || '';
+          target.ch.push([ch, ac]);
+          i += 2;
+        } else {
+          i += 1;
+        }
+      }
+      continue;
+    }
+
+    // ── AC slide: cards layout — accomplishments as standalone strings
+    // Look for "Key Accomplishments" title; items are runs that aren't chrome.
+    if (runs.some(r => /Key Accomplishments/i.test(r))) {
+      const items = runs.filter(r =>
+        !sliceOff.some(o => r.startsWith(o)) &&
+        !/^Key Accomplishments/i.test(r) &&
+        !/^continued$/i.test(r) &&
+        !/^\d+$/.test(r.trim())  // skip bare card numbers
+      );
+      items.forEach(it => { if (it.length > 2) target.ac.push(it.trim()); });
+      continue;
+    }
+
+    // ── NW slide: numbered list of "next period" items
+    if (runs.some(r => /Next (Month|Week|Quarter|Period) Focus/i.test(r))) {
+      const items = runs.filter(r =>
+        !sliceOff.some(o => r.startsWith(o)) &&
+        !/Next (Month|Week|Quarter|Period) Focus/i.test(r) &&
+        !/^continued$/i.test(r) &&
+        !/^\d+$/.test(r.trim())
+      );
+      items.forEach(it => { if (it.length > 2) target.nw.push(it.trim()); });
+      continue;
+    }
+  }
+
+  // Only return sections that actually have content OR are in wantedSet
+  const result = {};
+  for (const sid of wantedSet) {
+    if (out[sid]) result[sid] = out[sid];
+    else result[sid] = { p: '', kp: [], ac: [], ch: [], nw: [] }; // empty placeholder
+  }
+  return result;
+}
+
 // ── Robust PPT metadata extractor — handles PowerPoint splitting text
 //    into multiple <a:t> runs, decodes XML entities, parses JSON.
 async function _extractKabiMetaFromZip(zip) {
@@ -2927,21 +3162,15 @@ function closeRestoreModal() {
 }
 function _restoreModalUpdate() {
   const modeSel = document.querySelector('input[name="r-mode"]:checked')?.value || 'single';
-  const metaSel = document.querySelector('input[name="r-meta"]:checked')?.value || 'auto';
   // Multi-file: enable multiple attribute on file picker
   const fi = document.getElementById('r-file-input');
   if (fi) {
     if (modeSel === 'multi') fi.setAttribute('multiple', '');
     else fi.removeAttribute('multiple');
   }
-  // Show/hide manual override block
-  const manual = document.getElementById('r-manual-fields');
-  if (manual) manual.style.display = (metaSel === 'manual') ? 'block' : 'none';
-  // Update file label
+  // File label (manual is now always on; choose file is step 3)
   const lbl = document.getElementById('r-file-label');
-  if (lbl) {
-    lbl.textContent = (metaSel === 'manual' ? '4' : '3') + '. Choose ' + (modeSel === 'multi' ? 'files' : 'file');
-  }
+  if (lbl) lbl.textContent = '3. Choose ' + (modeSel === 'multi' ? 'files' : 'file');
   // Initialize / refresh period dropdowns
   _restorePeriodUpdate();
 }
@@ -3030,23 +3259,24 @@ async function _restoreModalSubmit() {
       return;
     }
 
-    const metaSel = document.querySelector('input[name="r-meta"]:checked')?.value || 'auto';
-    let override = null;
-    if (metaSel === 'manual') {
-      const mode = document.getElementById('r-mode-sel').value;
-      const period = _restoreGetPeriod();
-      if (!period) {
-        document.getElementById('r-file-status').textContent = '⚠ Please complete the period dropdowns.';
-        return;
-      }
-      const checked = Array.from(document.querySelectorAll('#r-sections input[type="checkbox"]:checked'));
-      const secs = checked.map(c => c.value);
-      // Collect new custom sections to register
-      const newCustom = checked.filter(c => c.dataset.newsection === '1').map(c => ({
-        id: c.value, name: c.dataset.name || c.value, badge: '★', color: '#62C6D3', builtin: false
-      }));
-      override = { mode, period, secs, newCustom };
+    // Always manual mode now
+    const mode = document.getElementById('r-mode-sel').value;
+    const period = _restoreGetPeriod();
+    if (!period) {
+      document.getElementById('r-file-status').textContent = '⚠ Please complete the period dropdowns.';
+      return;
     }
+    const checked = Array.from(document.querySelectorAll('#r-sections input[type="checkbox"]:checked'));
+    const secs = checked.map(c => c.value);
+    if (!secs.length) {
+      document.getElementById('r-file-status').textContent = '⚠ Please select at least one section.';
+      return;
+    }
+    // Collect new custom sections to register
+    const newCustom = checked.filter(c => c.dataset.newsection === '1').map(c => ({
+      id: c.value, name: c.dataset.name || c.value, badge: '★', color: '#62C6D3', builtin: false
+    }));
+    const override = { mode, period, secs, newCustom };
 
     document.getElementById('r-file-status').textContent = '⏳ Restoring…';
     document.getElementById('r-results').style.display = 'none';
@@ -3116,12 +3346,33 @@ async function _restorePPTFiles(files, override) {
         }
       }
 
+      // If we got no metadata, try parsing the slides directly.
+      let parsedFromSlides = false;
+      if ((!meta || !meta.secs || !Object.keys(meta.secs).length) && override && override.secs && override.secs.length) {
+        try {
+          const parsed = await _parseSlidesForSections(z, override.secs);
+          // Always synthesize meta from override + parsed (even if parsed is empty)
+          meta = {
+            _kabi_v: 2,
+            period: override.period,
+            mode: override.mode,
+            secs: parsed,
+            _customSections: (meta && meta._customSections) || []
+          };
+          // Mark if we actually parsed any content
+          const totalItems = Object.values(parsed).reduce((sum, sd) => sum + ((sd.kp||[]).length + (sd.ac||[]).length + (sd.ch||[]).length + (sd.nw||[]).length), 0);
+          parsedFromSlides = totalItems > 0;
+        } catch (e) {
+          console.warn('Slide parser failed:', e);
+        }
+      }
+      // Final guard: must have a period+mode (override already provides them in manual mode)
       if (!meta || !meta.period || !meta.mode) {
-        stats.failed++; stats.details.push({ name: file.name, reason: 'No KABi metadata in file. Re-export from the dashboard, or use Manual mode with a section that contains data.', status: 'failed' });
+        stats.failed++; stats.details.push({ name: file.name, reason: 'No period/mode could be determined for this file.', status: 'failed' });
         continue;
       }
       if (!meta.secs || !Object.keys(meta.secs).length) {
-        stats.failed++; stats.details.push({ name: file.name, reason: 'No matching sections found in the file (the selected section(s) are missing from the file metadata). Try Auto-detect to see what sections the file contains.', status: 'failed' });
+        stats.failed++; stats.details.push({ name: file.name, reason: 'No sections specified.', status: 'failed' });
         continue;
       }
 
@@ -3192,7 +3443,9 @@ async function _restorePPTFiles(files, override) {
 
       if (saved) {
         stats.restored++;
-        stats.details.push({ name: file.name, period: meta.period, mode: meta.mode, sections: Object.keys(meta.secs), status: 'restored', reason: 'Saved ' + Object.keys(meta.secs).length + ' section(s) to ' + meta.period + ' (' + meta.mode + ')' });
+        const itemsCount = Object.values(meta.secs).reduce((sum, sd) => sum + ((sd.kp||[]).length + (sd.ac||[]).length + (sd.ch||[]).length + (sd.nw||[]).length), 0);
+        const parseNote = parsedFromSlides ? ' (auto-extracted ' + itemsCount + ' items from slides)' : (itemsCount === 0 ? ' (empty placeholders — open the entry to fill in data)' : '');
+        stats.details.push({ name: file.name, period: meta.period, mode: meta.mode, sections: Object.keys(meta.secs), status: 'restored', reason: 'Saved ' + Object.keys(meta.secs).length + ' section(s) to ' + meta.period + ' (' + meta.mode + ')' + parseNote });
         // Propagate custom sections to the dashboard (from file metadata)
         if (Array.isArray(meta._customSections)) {
           const have = new Set(_customSections.map(s => s.id));
@@ -3955,6 +4208,207 @@ function _slugify(s) {
     .trim()
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-');
+}
+
+
+// ── Per-section archive indicator ─────────────────────────────────
+// Caches the latest archive lookup so loadArchivedSection() doesn't
+// have to re-fetch.
+window._archivedSectionsCache = window._archivedSectionsCache || { mode: null, slug: null, data: null };
+
+async function _refreshSectionArchiveBadges() {
+  try {
+    const labelEl = document.getElementById(MODE_CFG.labelId);
+    const period = labelEl ? labelEl.value.trim() : '';
+    if (!period) return;
+    const slug = _slugify(period);
+
+    let archived = null; // entry: { period, sections: {...} }
+
+    // 1) Server archive
+    if (_serverAvailable) {
+      try {
+        const r = await fetchWithTimeout('/api/archive/' + CURRENT_MODE + '/' + encodeURIComponent(slug), { method: 'GET' }, 5000);
+        if (r && r.ok) archived = await r.json();
+      } catch (e) {}
+    }
+
+    // 2) LS archive fallback
+    if (!archived) {
+      try {
+        const lsEntry = _lsArchiveGet(CURRENT_MODE, slug);
+        if (lsEntry) archived = lsEntry;
+      } catch (e) {}
+    }
+
+    // 3) HISTORICAL_DATA fallback (embedded preloads)
+    if (!archived && typeof HISTORICAL_DATA !== 'undefined') {
+      for (const entry of HISTORICAL_DATA) {
+        if ((entry._mode || 'weekly') === CURRENT_MODE && entry.week && _slugify(entry.week) === slug) {
+          archived = { period: entry.week, sections: entry.secs || {}, _isEmbedded: true };
+          break;
+        }
+      }
+    }
+
+    // Cache for loadArchivedSection
+    window._archivedSectionsCache = {
+      mode: CURRENT_MODE,
+      slug,
+      period,
+      data: archived
+    };
+
+    // Get the set of section IDs that have saved data
+    const savedSet = new Set();
+    if (archived && archived.sections) {
+      for (const [sid, sd] of Object.entries(archived.sections)) {
+        // Section counts as "saved" if it has meaningful content
+        const hasData = !!(sd && (
+          (sd.kp && sd.kp.length) ||
+          (sd.ac && sd.ac.length) ||
+          (sd.ch && sd.ch.length) ||
+          (sd.nw && sd.nw.length) ||
+          (sd.tk && sd.tk.length) ||
+          (sd.pr && sd.pr.length) ||
+          (sd.io && (sd.io.inFte || sd.io.inNonFte || sd.io.outFte || sd.io.outNonFte)) ||
+          (sd.p && sd.p.trim())
+        ));
+        if (hasData) savedSet.add(sid);
+      }
+    }
+
+    // Update each section's badge
+    document.querySelectorAll('.sec-archive-badge').forEach(badge => {
+      const sid = badge.dataset.sec;
+      if (savedSet.has(sid)) {
+        badge.style.display = 'inline-flex';
+        badge.classList.remove('editing');
+        badge.textContent = '📁 Already in archive — Click to load';
+      } else {
+        badge.style.display = 'none';
+      }
+    });
+  } catch (err) {
+    console.warn('Section badge refresh failed:', err);
+  }
+}
+
+// Load the archived section data into the form
+async function loadArchivedSection(secId) {
+  try {
+    const cache = window._archivedSectionsCache;
+    if (!cache || !cache.data || !cache.data.sections || !cache.data.sections[secId]) {
+      _showToast('⚠ No archived data found for this section', '#F59E0B');
+      return;
+    }
+    const secData = cache.data.sections[secId];
+
+    // Restore-section helper handles all section types (standard, IT, Facility).
+    // Use the same logic as the main restore() function but for a single section.
+    if (typeof restoreSection === 'function') {
+      restoreSection(secId, secData);
+    } else {
+      // Fallback: build a partial restore call
+      const partial = { week: cache.period, _mode: cache.mode, secs: {} };
+      partial.secs[secId] = secData;
+      restore(partial);
+    }
+
+    // Update the badge to "editing" state
+    const badge = document.getElementById('badge-' + secId);
+    if (badge) {
+      badge.classList.add('editing');
+      badge.textContent = '✏ Editing archived entry — Save will overwrite';
+    }
+
+    _showToast('✦ Loaded archived data for this section');
+  } catch (err) {
+    console.error('loadArchivedSection failed', err);
+    _showToast('⚠ Could not load archived data', '#EF4444');
+  }
+}
+
+// Restore a single section's data into its UI controls.
+function restoreSection(secId, sd) {
+  if (!sd || typeof sd !== 'object') return;
+  // Presenter
+  const pInp = document.querySelector('.p-inp[data-s="' + secId + '"]');
+  if (pInp) pInp.value = sd.p || '';
+
+  // Standard fields: kp, ac, ch, nw (mirror the main restore logic)
+  // KP table
+  const kpBody = document.querySelector('#' + secId + '-kp tbody');
+  if (kpBody) {
+    kpBody.innerHTML = '';
+    (sd.kp || []).forEach(r => aR(secId + '-kp', 0, undefined, r));
+  }
+  // AC list
+  const acDiv = document.getElementById(secId + '-ac');
+  if (acDiv) {
+    acDiv.innerHTML = '';
+    (sd.ac || []).forEach(item => aA(secId + '-ac', item));
+  }
+  // CH table
+  const chBody = document.querySelector('#' + secId + '-ch tbody');
+  if (chBody) {
+    chBody.innerHTML = '';
+    (sd.ch || []).forEach(r => aR(secId + '-ch', 1, undefined, r));
+  }
+  // NW list
+  const nwDiv = document.getElementById(secId + '-nw');
+  if (nwDiv) {
+    nwDiv.innerHTML = '';
+    (sd.nw || []).forEach(item => aN(secId + '-nw', item));
+  }
+
+  // IT-specific (tickets table)
+  if (secId === 'it' && sd.tk) {
+    const tkBody = document.querySelector('#it-tk tbody');
+    if (tkBody) {
+      tkBody.innerHTML = '';
+      sd.tk.forEach(r => {
+        let row;
+        if (Array.isArray(r) && r.length === 3) row = [r[0]||'', r[2]||'', '', r[1]||''];
+        else if (Array.isArray(r) && r.length >= 4) row = r.slice(0, 4);
+        else row = ['','','',''];
+        if (typeof aRitTk === 'function') aRitTk(row);
+      });
+      if (typeof _recalcITStats === 'function') _recalcITStats();
+    }
+  }
+
+  // Facility-specific (purchases + tickets)
+  if (secId === 'fac') {
+    if (sd.pr) {
+      const prBody = document.querySelector('#fac-pr tbody');
+      if (prBody) {
+        prBody.innerHTML = '';
+        sd.pr.forEach(r => aR('fac-pr', 0, 2, r));
+      }
+    }
+    if (sd.tk) {
+      const tkBody = document.querySelector('#fac-tk tbody');
+      if (tkBody) {
+        tkBody.innerHTML = '';
+        sd.tk.forEach(r => aR('fac-tk', 0, 3, r));
+      }
+    }
+    const ptEl = document.getElementById('fac-pt');
+    if (ptEl && sd.pt !== undefined) ptEl.value = sd.pt;
+  }
+
+  // Operations In&Out
+  if (secId === 'ops' && sd.io && typeof ioRestoreTable === 'function') {
+    ['io-in-fte-tbl', 'io-in-nonfte-tbl', 'io-out-fte-tbl', 'io-out-nonfte-tbl'].forEach(id => {
+      const tb = document.querySelector('#' + id + ' tbody');
+      if (tb) tb.innerHTML = '';
+    });
+    ioRestoreTable('io-in-fte-tbl',    'in',  sd.io.inFte);
+    ioRestoreTable('io-in-nonfte-tbl', 'in',  sd.io.inNonFte);
+    ioRestoreTable('io-out-fte-tbl',   'out', sd.io.outFte);
+    ioRestoreTable('io-out-nonfte-tbl','out', sd.io.outNonFte);
+  }
 }
 
 async function _checkPeriodArchive() {
@@ -6130,7 +6584,7 @@ function buildStandardSectionHTML(sec) {
   const periodLabel = CURRENT_MODE === 'weekly' ? 'Week' : CURRENT_MODE === 'monthly' ? 'Month' : 'Quarter';
   let html = '<div class="section" id="sec-' + sec.id + '">'
     + '<div class="sec-hdr"><div class="sec-left"><div class="sec-badge" style="background:' + sec.color + '">' + sec.badge + '</div>'
-    + '<div><div class="sec-name">' + sec.name + '</div>'
+    + '<div><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><div class="sec-name">' + sec.name + '</div><span class="sec-archive-badge" id="badge-' + sec.id + '" data-sec="' + sec.id + '" style="display:none" onclick="loadArchivedSection(\'' + sec.id + '\')" title="Click to load the archived data for this section">📁 Already in archive — Click to load</span></div>'
     + '<div class="prow">Presenter:<input class="p-inp" data-s="' + sec.id + '" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + sec.id + '" onclick="regenerateSectionFromSource(\'' + sec.id + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg> Generate</button><button class="sec-clear-btn" data-sec="' + sec.id + '" onclick="clearSection(\'' + sec.id + '\')" title="Clear section data"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"vertical-align:-2px\"><polyline points=\"3 6 5 6 21 6\"/><path d=\"M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6\"/></svg> Clear</button><button class="sec-rename-btn" data-sec="' + sec.id + '" onclick="renameSection(\'' + sec.id + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-clear-btn" data-sec="' + sec.id + '" onclick="clearSection(\'' + sec.id + '\')" title="Clear section content"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Clear</button><button class="sec-save-btn" data-sec="' + sec.id + '" onclick="saveSectionToArchive(\'' + sec.id + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : (CURRENT_MODE === 'weekly' ? '<button class="sec-rename-btn" data-sec="' + sec.id + '" onclick="renameSection(\'' + sec.id + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-clear-btn" data-sec="' + sec.id + '" onclick="clearSection(\'' + sec.id + '\')" title="Clear section content"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Clear</button><button class="sec-save-btn" data-sec="' + sec.id + '" onclick="saveSectionToArchive(\'' + sec.id + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : '')) + '</div>'
     + '<div class="sec-progress" data-s="' + sec.id + '" style="display:none"><span class="sec-progress-label">0 of 0 tasks completed</span><div class="sec-progress-bar"><div class="sec-progress-fill" style="width:0"></div></div><span class="sec-progress-pct">0%</span></div>'
     // Key Points — NO dismiss button
@@ -6386,7 +6840,7 @@ function buildITSectionHTML(sec) {
   const pl = CURRENT_MODE === 'weekly' ? 'Weekly' : CURRENT_MODE === 'monthly' ? 'Monthly' : 'Quarterly';
   return '<div class="section" id="sec-it">'
     + '<div class="sec-hdr"><div class="sec-left"><div class="sec-badge" style="background:var(--teal-dk)">' + sec.badge + '</div>'
-    + '<div><div class="sec-name">Information Technology</div>'
+    + '<div><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><div class="sec-name">Information Technology</div><span class="sec-archive-badge" id="badge-it" data-sec="it" style="display:none" onclick="loadArchivedSection(\'it\')" title="Click to load the archived data for this section">📁 Already in archive — Click to load</span></div>'
     + '<div class="prow">Presenter:<input class="p-inp" data-s="it" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + 'it' + '" onclick="regenerateSectionFromSource(\'' + 'it' + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg> Generate</button><button class="sec-clear-btn" data-sec="' + 'it' + '" onclick="clearSection(\'' + 'it' + '\')" title="Clear section data"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"vertical-align:-2px\"><polyline points=\"3 6 5 6 21 6\"/><path d=\"M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6\"/></svg> Clear</button><button class="sec-rename-btn" data-sec="' + 'it' + '" onclick="renameSection(\'' + 'it' + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-clear-btn" data-sec="' + 'it' + '" onclick="clearSection(\'' + 'it' + '\')" title="Clear section content"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Clear</button><button class="sec-save-btn" data-sec="' + 'it' + '" onclick="saveSectionToArchive(\'' + 'it' + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : (CURRENT_MODE === 'weekly' ? '<button class="sec-rename-btn" data-sec="' + 'it' + '" onclick="renameSection(\'' + 'it' + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-clear-btn" data-sec="' + 'it' + '" onclick="clearSection(\'' + 'it' + '\')" title="Clear section content"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Clear</button><button class="sec-save-btn" data-sec="' + 'it' + '" onclick="saveSectionToArchive(\'' + 'it' + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : '')) + '</div>'
     + '<div class="card" id="card-it-stats"><div class="card-hdr"><span class="card-ttl">Support Tickets — ' + pl + ' Data</span>'
     + '<button class="card-dismiss" onclick="dismissCard(\'card-it-stats\')" title="Remove">✕</button></div>'
@@ -6417,7 +6871,7 @@ function buildFacilitySectionHTML(sec) {
   const pl = CURRENT_MODE === 'weekly' ? 'Weekly' : CURRENT_MODE === 'monthly' ? 'Monthly' : 'Quarterly';
   return '<div class="section" id="sec-fac">'
     + '<div class="sec-hdr"><div class="sec-left"><div class="sec-badge" style="background:#1B2631">' + sec.badge + '</div>'
-    + '<div><div class="sec-name">Facility</div>'
+    + '<div><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><div class="sec-name">Facility</div><span class="sec-archive-badge" id="badge-fac" data-sec="fac" style="display:none" onclick="loadArchivedSection(\'fac\')" title="Click to load the archived data for this section">📁 Already in archive — Click to load</span></div>'
     + '<div class="prow">Presenter:<input class="p-inp" data-s="fac" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + 'fac' + '" onclick="regenerateSectionFromSource(\'' + 'fac' + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg> Generate</button><button class="sec-clear-btn" data-sec="' + 'fac' + '" onclick="clearSection(\'' + 'fac' + '\')" title="Clear section data"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"vertical-align:-2px\"><polyline points=\"3 6 5 6 21 6\"/><path d=\"M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6\"/></svg> Clear</button><button class="sec-rename-btn" data-sec="' + 'fac' + '" onclick="renameSection(\'' + 'fac' + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-clear-btn" data-sec="' + 'fac' + '" onclick="clearSection(\'' + 'fac' + '\')" title="Clear section content"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Clear</button><button class="sec-save-btn" data-sec="' + 'fac' + '" onclick="saveSectionToArchive(\'' + 'fac' + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : (CURRENT_MODE === 'weekly' ? '<button class="sec-rename-btn" data-sec="' + 'fac' + '" onclick="renameSection(\'' + 'fac' + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-clear-btn" data-sec="' + 'fac' + '" onclick="clearSection(\'' + 'fac' + '\')" title="Clear section content"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Clear</button><button class="sec-save-btn" data-sec="' + 'fac' + '" onclick="saveSectionToArchive(\'' + 'fac' + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : '')) + '</div>'
     + '<div class="card" id="card-fac-tk"><div class="card-hdr"><span class="card-ttl">Facility Tickets</span><button class="btn btn-ghost btn-sm" onclick="aR(\'fac-tk\',0,3)">+ Row</button>'
     + '<button class="card-dismiss" onclick="dismissCard(\'card-fac-tk\')" title="Remove">✕</button></div>'
@@ -6920,16 +7374,8 @@ document.addEventListener('keydown', (e) => {
         </div>
       </div>
 
-      <div class="restore-field">
-        <label class="restore-label">2. Use the metadata embedded in each file, OR override below</label>
-        <div class="restore-toggle">
-          <label class="restore-toggle-opt"><input type="radio" name="r-meta" value="auto" checked onchange="_restoreModalUpdate()"/>Auto-detect from file</label>
-          <label class="restore-toggle-opt"><input type="radio" name="r-meta" value="manual" onchange="_restoreModalUpdate()"/>Specify date + section manually</label>
-        </div>
-      </div>
-
-      <div class="restore-field" id="r-manual-fields" style="display:none">
-        <label class="restore-label">3a. Period</label>
+      <div class="restore-field" id="r-manual-fields">
+        <label class="restore-label">2a. Period</label>
         <div class="restore-row">
           <select id="r-mode-sel" class="restore-input" onchange="_restorePeriodUpdate()">
             <option value="weekly">Weekly</option>
@@ -6939,7 +7385,7 @@ document.addEventListener('keydown', (e) => {
         </div>
         <div class="restore-row" id="r-period-pickers" style="margin-top:8px"></div>
         <div class="restore-hint" id="r-period-preview" style="margin-top:6px"></div>
-        <label class="restore-label" style="margin-top:12px">3b. Section(s)</label>
+        <label class="restore-label" style="margin-top:12px">2b. Section(s)</label>
         <div class="restore-sections" id="r-sections">
           <label class="restore-chk"><input type="checkbox" value="ops"/> Operations</label>
           <label class="restore-chk"><input type="checkbox" value="hcdev"/> HC Dev & PM</label>
