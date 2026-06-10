@@ -844,19 +844,19 @@ body.dash-active #dash-root {display:flex;flex-direction:column;min-height:100vh
     <div class="hub-head">Report Hub</div>
     <div class="hub-sub">Select a reporting period to add or edit updates</div>
     <div class="hub-cards">
-      <div class="hub-card wk" onclick="openDash('weekly')">
+      <div class="hub-card wk" onclick="startNewReport('weekly')">
         <div class="hub-card-icon">🗓️</div>
         <div class="hub-card-lbl">+ New Update</div>
         <div class="hub-card-name">Weekly</div>
         <div class="hub-card-desc">Enter this week's updates · auto-syncs → Monthly</div>
       </div>
-      <div class="hub-card mo" onclick="openDash('monthly')">
+      <div class="hub-card mo" onclick="startNewReport('monthly')">
         <div class="hub-card-icon">📋</div>
         <div class="hub-card-lbl">+ New Update</div>
         <div class="hub-card-name">Monthly</div>
         <div class="hub-card-desc">Auto-filled from Weekly · review & edit → Quarterly</div>
       </div>
-      <div class="hub-card qr" onclick="openDash('quarterly')">
+      <div class="hub-card qr" onclick="startNewReport('quarterly')">
         <div class="hub-card-icon">📊</div>
         <div class="hub-card-lbl">+ New Update</div>
         <div class="hub-card-name">Quarterly</div>
@@ -1263,6 +1263,46 @@ async function goHub() {
   document.body.className = 'hub-active';
 }
 
+
+// Hub "+ New Update" entry point. Clears the LS draft so the dashboard
+// opens empty. If a non-empty draft exists, asks the user first.
+async function startNewReport(mode) {
+  try {
+    const draft = LS.get(mode);
+    if (draft && draft.week) {
+      const hasContent = Object.values(draft.secs || {}).some(s => {
+        if (!s) return false;
+        return (s.kp && s.kp.length) ||
+               (s.ac && s.ac.length) ||
+               (s.ch && s.ch.length) ||
+               (s.nw && s.nw.length) ||
+               (s.tk && s.tk.length) ||
+               (s.pr && s.pr.length) ||
+               (s.p && s.p.trim());
+      });
+      if (hasContent) {
+        const ok = confirm(
+          'There is an unsaved draft for "' + draft.week + '".\n\n' +
+          'Start a NEW empty update? (this will discard the draft)\n\n' +
+          'OK = Start new (empty form)\n' +
+          'Cancel = Continue editing the draft'
+        );
+        if (!ok) {
+          // User wants to keep working on the draft
+          await openDash(mode);
+          return;
+        }
+      }
+    }
+    // Clear the LS draft and open empty
+    try { LS.clear(mode); } catch (e) {}
+    await openDash(mode);
+  } catch (err) {
+    console.error('startNewReport failed', err);
+    await openDash(mode);
+  }
+}
+
 async function openDash(mode) {
   CURRENT_MODE = mode;
   MODE_CFG = MODES[mode];
@@ -1437,6 +1477,38 @@ function aN(lid,v){
   l.appendChild(d);
 }
 
+
+// ─── Facility purchases: auto-calculate total ──────────────────────
+// Parse "5,000 SAR" → 5000  ·  "1234.56" → 1234.56  ·  "—" → 0
+function _parseAmountStr(s) {
+  if (s == null) return 0;
+  // Keep digits and dots only (drop commas, SAR, spaces, currency symbols)
+  const cleaned = String(s).replace(/[,\s]/g, '').replace(/[^\d.]/g, '');
+  const n = parseFloat(cleaned);
+  return isFinite(n) ? n : 0;
+}
+
+// Format 5000 → "5,000 SAR"
+function _formatAmountStr(n) {
+  if (!isFinite(n) || n === 0) return '';
+  return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' SAR';
+}
+
+function _recalcFacilityTotal() {
+  const pg = document.getElementById('fac-pg');
+  const tot = document.getElementById('fac-tot');
+  if (!pg || !tot) return;
+  let sum = 0;
+  pg.querySelectorAll('.pc').forEach(box => {
+    const inputs = box.querySelectorAll('input.ed');
+    // Vendor is first input, amount is second
+    if (inputs.length >= 2) {
+      sum += _parseAmountStr(inputs[1].value);
+    }
+  });
+  tot.value = _formatAmountStr(sum);
+}
+
 function aPC(vals){
   const g=document.getElementById('fac-pg'); if(!g) return;
   const i=g.querySelectorAll('.pc').length;
@@ -1445,10 +1517,11 @@ function aPC(vals){
   const d=document.createElement('div'); d.className='pc'; d.style.position='relative';
   d.innerHTML=`<div class="pcb" style="background:${cl}"></div>`+
     `<button style="position:absolute;top:4px;right:4px;background:none;border:none;cursor:pointer;color:#888;font-size:11px;line-height:1" `+
-    `onclick="this.closest('.pc').remove();document.querySelectorAll('#fac-pg .pc').forEach((c,j)=>{c.querySelector('.pcb').style.background=['var(--teal)','var(--green)','var(--blue)'][j%3]})">✕</button>`+
+    `onclick="this.closest('.pc').remove();document.querySelectorAll('#fac-pg .pc').forEach((c,j)=>{c.querySelector('.pcb').style.background=['var(--teal)','var(--green)','var(--blue)'][j%3]});setTimeout(_recalcFacilityTotal,0)">✕</button>`+
     `<div class="pcd"><div class="pv"><input class="ed" value="${vals?xe(vals[0]):''}" placeholder="Vendor"/></div>`+
-    `<div class="pa" style="color:${cl}"><input class="ed" value="${vals?xe(vals[1]):''}" placeholder="000 SAR" style="width:110px"/></div></div>`;
+    `<div class="pa" style="color:${cl}"><input class="ed" value="${vals?xe(vals[1]):''}" placeholder="0 SAR" style="width:110px" oninput="_recalcFacilityTotal()"/></div></div>`;
   g.appendChild(d);
+  setTimeout(_recalcFacilityTotal, 0);
 }
 
 // ── COLLECT ──
@@ -1570,7 +1643,8 @@ function restore(d){
     (fac.ac||[]).forEach(v=>aA('fac-ac',v));
     const fpg=document.getElementById('fac-pg');
     if(fpg){fpg.innerHTML='';(fac.pr||[]).forEach(p=>aPC(p));}
-    const ft=document.getElementById('fac-tot'); if(ft) ft.value=fac.pt||'';
+    // Total auto-calculated by _recalcFacilityTotal() (triggered by aPC above)
+    setTimeout(() => { try { _recalcFacilityTotal(); } catch(e) {} }, 50);
     (fac.ch||[]).forEach(r=>aR('fac-ch',1,undefined,r));
     (fac.nw||[]).forEach(v=>aN('fac-nw',v));
   }
@@ -2979,11 +3053,11 @@ async function _parseSlidesForSections(zip, wantedSecIds) {
     const runs = getSlideRuns(xml);
     if (!runs.length) continue;
 
-    // Detect DIV slide: short list of runs, usually contains the bold section name.
-    // The big text from the export is at fontSize 34 — we can't read font size,
-    // so we use heuristic: first non-KABi/Confidential paragraph that matches a
-    // known section name (full or prefix).
-    const firstMeaningful = runs.find(r => !sliceOff.some(o => r.startsWith(o)));
+    // Detect DIV slide: only slides with "Presented by" text are section
+    // dividers. This prevents content slides (which carry the section name
+    // in a small corner label) from being mistakenly treated as DIVs.
+    const hasPresenterLine = runs.some(r => r.startsWith('Presented by'));
+    const firstMeaningful = hasPresenterLine ? runs.find(r => !sliceOff.some(o => r.startsWith(o))) : null;
     if (firstMeaningful) {
       const norm = firstMeaningful.toLowerCase().replace(/\s+/g, ' ').replace(/&/g, '').replace(/\./g, '').trim();
       // Try direct match first
@@ -4378,15 +4452,13 @@ function restoreSection(secId, sd) {
     }
   }
 
-  // Facility-specific (purchases + tickets)
+  // Facility-specific (purchases via #fac-pg grid + tickets)
   if (secId === 'fac') {
-    if (sd.pr) {
-      const prBody = document.querySelector('#fac-pr tbody');
-      if (prBody) {
-        prBody.innerHTML = '';
-        sd.pr.forEach(r => aR('fac-pr', 0, 2, r));
-      }
-    }
+    // Restore purchase boxes via aPC (grid layout, not a table)
+    const pg = document.getElementById('fac-pg');
+    if (pg) pg.innerHTML = '';
+    (sd.pr || []).forEach(r => aPC(r));
+    // Tickets table
     if (sd.tk) {
       const tkBody = document.querySelector('#fac-tk tbody');
       if (tkBody) {
@@ -4394,8 +4466,10 @@ function restoreSection(secId, sd) {
         sd.tk.forEach(r => aR('fac-tk', 0, 3, r));
       }
     }
-    const ptEl = document.getElementById('fac-pt');
-    if (ptEl && sd.pt !== undefined) ptEl.value = sd.pt;
+    // Auto-recalc total instead of relying on stored pt value
+    if (typeof _recalcFacilityTotal === 'function') {
+      setTimeout(_recalcFacilityTotal, 50);
+    }
   }
 
   // Operations In&Out
@@ -6883,7 +6957,7 @@ function buildFacilitySectionHTML(sec) {
     + '<div class="card" id="card-fac-pr"><div class="card-hdr"><span class="card-ttl">' + pl + ' Purchases</span>'
     + '<button class="card-dismiss" onclick="dismissCard(\'card-fac-pr\')" title="Remove">✕</button></div><div class="card-body"><div class="pg" id="fac-pg"></div>'
     + '<button class="add-row" onclick="aPC()">+ Add Box</button>'
-    + '<div class="pt">Total:<div class="ptv"><input id="fac-tot" class="ed" placeholder="000 SAR" style="width:76px;text-align:center"/></div></div></div></div>'
+    + '<div class="pt">Total:<div class="ptv"><input id="fac-tot" class="ed" placeholder="0 SAR" readonly style="width:120px;text-align:center;background:#F0F4F8;color:#0A3260;font-weight:700;cursor:not-allowed" title="Auto-calculated from purchases below"/></div></div></div></div>'
     + '<div class="card" id="card-fac-ch"><div class="card-hdr"><span class="card-ttl">Challenges</span><button class="btn btn-ghost btn-sm" onclick="aR(\'fac-ch\',1)">+ Row</button>'
     + '<button class="card-dismiss" onclick="dismissCard(\'card-fac-ch\')" title="Remove">✕</button></div>'
     + '<div class="card-body"><table class="tbl" id="fac-ch"><thead><tr><th style="width:48%">Challenge</th><th class="th-g">Action Required</th><th style="width:26px"></th></tr></thead><tbody></tbody></table>'
@@ -7015,7 +7089,8 @@ function restoreDynamic(d) {
       (sd.ac || []).forEach(v => aA('fac-ac', v));
       const fpg = document.getElementById('fac-pg');
       if (fpg) { fpg.innerHTML = ''; (sd.pr || []).forEach(p => aPC(p)); }
-      const ft = document.getElementById('fac-tot'); if (ft) ft.value = sd.pt || '';
+      // Total auto-calculated by _recalcFacilityTotal() (triggered by aPC above)
+      setTimeout(() => { try { _recalcFacilityTotal(); } catch(e) {} }, 50);
       (sd.ch || []).forEach(r => aR('fac-ch', 1, undefined, r));
       (sd.nw || []).forEach(v => aN('fac-nw', v));
     } else {
