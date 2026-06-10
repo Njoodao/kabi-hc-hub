@@ -761,6 +761,32 @@ body.dash-active #dash-root {display:flex;flex-direction:column;min-height:100vh
   line-height: 1.6;
 }
 .arc-safety-note strong { color: #A7F3D0; }
+
+.restore-modal-bg { position: fixed; inset: 0; background: rgba(10,20,40,.7); backdrop-filter: blur(6px); z-index: 9000; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.restore-modal { background: #fff; border-radius: 14px; width: 100%; max-width: 540px; max-height: 88vh; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(0,0,0,.4); }
+.restore-modal-hdr { padding: 18px 22px; border-bottom: 1px solid #E5E7EB; display: flex; justify-content: space-between; align-items: center; }
+.restore-modal-hdr h3 { margin: 0; font-size: 16px; color: #0F172A; font-weight: 700; }
+.restore-modal-x { background: none; border: none; font-size: 18px; cursor: pointer; color: #94A3B8; padding: 4px 8px; border-radius: 6px; }
+.restore-modal-x:hover { background: #F1F5F9; color: #0F172A; }
+.restore-modal-body { padding: 18px 22px; overflow-y: auto; flex: 1; }
+.restore-modal-ftr { padding: 14px 22px; border-top: 1px solid #E5E7EB; display: flex; gap: 10px; justify-content: flex-end; }
+.restore-field { margin-bottom: 18px; }
+.restore-label { display: block; font-weight: 700; font-size: 12px; color: #334155; margin-bottom: 8px; letter-spacing: .02em; }
+.restore-toggle { display: flex; gap: 18px; flex-wrap: wrap; }
+.restore-toggle-opt { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #1E293B; cursor: pointer; }
+.restore-row { display: flex; gap: 8px; }
+.restore-input { flex: 1; padding: 9px 12px; border: 1px solid #CBD5E1; border-radius: 7px; font-size: 13px; font-family: inherit; outline: none; box-sizing: border-box; }
+.restore-input:focus { border-color: #62C6D3; box-shadow: 0 0 0 3px rgba(98,198,211,.18); }
+.restore-sections { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.restore-chk { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #1E293B; cursor: pointer; padding: 6px 8px; border-radius: 6px; background: #F8FAFC; border: 1px solid #E5E7EB; }
+.restore-chk input[type="checkbox"] { margin: 0; }
+.restore-hint { font-size: 11.5px; color: #94A3B8; margin-top: 6px; line-height: 1.45; }
+.restore-file { width: 100%; padding: 8px; font-size: 13px; }
+.restore-btn-cancel { padding: 10px 18px; background: #fff; border: 1px solid #CBD5E1; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 13px; color: #64748B; }
+.restore-btn-cancel:hover { background: #F8FAFC; }
+.restore-btn-submit { padding: 10px 18px; background: linear-gradient(135deg, #62C6D3, #4FB3C2); border: none; border-radius: 8px; cursor: pointer; font-weight: 700; font-size: 13px; color: #fff; }
+.restore-btn-submit:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(98,198,211,.4); }
+.restore-btn-submit:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
 </style>
 </head>
 <body class="hub-active">
@@ -843,9 +869,9 @@ body.dash-active #dash-root {display:flex;flex-direction:column;min-height:100vh
         <div class="hub-ar-empty">Select filters and click Search to find saved reports</div>
       </div>
       <div class="hub-archive-footer" style="margin-top:14px;display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap;">
-        <button class="hub-af-btn hub-af-btn-backup" onclick="exportArchive()" title="Download a JSON backup of all archive data">⬇ Backup</button>
-        <button class="hub-af-btn hub-af-btn-backup" onclick="document.getElementById('arc-import-input').click()" title="Restore archive data from a backup JSON file">⬆ Restore</button>
-        <input type="file" id="arc-import-input" accept="application/json,.json" style="display:none" onchange="importArchive(event)">
+        <button class="hub-af-btn hub-af-btn-backup" onclick="exportArchiveAsPPTs()" title="Download a ZIP of all archive entries as PPT files (one per period)">⬇ Backup (PPT)</button>
+        <button class="hub-af-btn hub-af-btn-backup" onclick="openRestoreModal()" title="Restore archive entries from PPT files — opens guided import">⬆ Restore (PPT)</button>
+        <!-- JSON backup kept hidden for power users via console: exportArchive() / importArchive() -->
       </div>
       <div class="arc-safety-note" style="margin-top:10px;margin-bottom:0;">🔒 <strong>Your data is safe across updates.</strong> Saved entries live in Vercel Blob storage (the cloud database), separate from the app code. When the app updates, your archive is preserved. Use <strong>⬇ Backup</strong> regularly for extra safety.</div>
     </div>
@@ -1400,11 +1426,8 @@ function collect(){
   });
   d.secs.it={
     p: document.querySelector('.p-inp[data-s="it"]')?.value||'',
-    t:  document.getElementById('it-t').value,
-    c1n:document.getElementById('it-c1n').value, c1l:document.getElementById('it-c1l').value,
-    c2n:document.getElementById('it-c2n').value, c2l:document.getElementById('it-c2l').value,
-    c3n:document.getElementById('it-c3n').value, c3l:document.getElementById('it-c3l').value,
-    tk: tr2('it-tk',3), kp: kp2('it-kp'), ac: ac2('it-ac'), ch: tr2('it-ch'), nw: nw2('it-nw')
+    tk: (typeof _collectITTickets === 'function') ? _collectITTickets() : tr2('it-tk',3),
+    kp: kp2('it-kp'), ac: ac2('it-ac'), ch: tr2('it-ch'), nw: nw2('it-nw')
   };
   const fpg=document.getElementById('fac-pg');
   d.secs.fac={
@@ -1476,7 +1499,18 @@ function restore(d){
   if(it){
     const pi=document.querySelector('.p-inp[data-s="it"]'); if(pi) pi.value=it.p||'';
     ['t','c1n','c1l','c2n','c2l','c3n','c3l'].forEach(k=>{const el=document.getElementById('it-'+k);if(el)el.value=it[k]||''});
-    (it.tk||[]).forEach(r=>aR('it-tk',0,3,r));
+    // IT tickets: new schema is 4-col [category, description, solution, status].
+    // Legacy is 3-col [category, status, description] — migrate before render.
+    const itTbody = document.querySelector('#it-tk tbody');
+    if (itTbody) itTbody.innerHTML = '';
+    (it.tk || []).forEach(r => {
+      let row;
+      if (Array.isArray(r) && r.length === 3)      row = [r[0]||'', r[2]||'', '', r[1]||''];
+      else if (Array.isArray(r) && r.length >= 4)  row = r.slice(0, 4);
+      else                                          row = ['','','',''];
+      if (typeof aRitTk === 'function') aRitTk(row);
+    });
+    if (typeof _recalcITStats === 'function') _recalcITStats();
     (it.kp||[]).forEach(r=>aR('it-kp',0,undefined,r));
     (it.ac||[]).forEach(v=>aA('it-ac',v));
     (it.ch||[]).forEach(r=>aR('it-ch',1,undefined,r));
@@ -1823,6 +1857,15 @@ async function runExport(){
   const D=collect();
   const W=D.week||MODE_CFG.reportName;
   const P=new PptxGenJS();
+  // Embed JSON metadata for PPT-based restore. Stored on the cover slide notes.
+  window._kabiExportMeta = JSON.stringify({
+    _kabi_v: 2,
+    period: W,
+    mode: CURRENT_MODE,
+    secs: D.secs || {},
+    _customSections: _customSections || [],
+    exportedAt: new Date().toISOString()
+  });
   P.layout='LAYOUT_16x9';
 
   const C=Object.assign({white:'FFFFFF',td:'001428',tm:'3A4A5C'},MODE_CFG.pptColors);
@@ -2022,6 +2065,12 @@ async function runExport(){
     s.addText('KABi',{x:.45,y:.3,w:2,h:.42,fontFace:'Calibri',fontSize:18,bold:true,color:C.white,margin:0});
     s.addText('Human Capital Department',{x:.45,y:.86,w:6.5,h:.34,fontFace:'Calibri',fontSize:12,color:C.teal,margin:0});
     s.addShape('rect',{x:.45,y:1.24,w:3.2,h:.05,fill:{color:C.teal},line:{color:C.teal}});
+    // Embed metadata in cover-slide notes for restore
+    try {
+      if (window._kabiExportMeta) {
+        s.addNotes('KABI_DATA_V2::' + window._kabiExportMeta + '::END');
+      }
+    } catch(e) { console.warn('addNotes failed', e); }
     s.addText(MODE_CFG.reportName,{x:.45,y:1.38,w:6.5,h:1.05,fontFace:'Calibri',fontSize:48,bold:true,color:C.white,margin:0});
     s.addShape('rect',{x:.45,y:2.6,w:2.5,h:.38,fill:{color:C.nm},line:{color:C.teal,width:1}});
     s.addText(W,{x:.45,y:2.6,w:2.5,h:.38,fontFace:'Calibri',fontSize:11,color:'8AAEC8',align:'center',valign:'middle',margin:0});
@@ -2054,38 +2103,121 @@ async function runExport(){
   {
     const it=D.secs.it||{};
     DIV('Information Technology',it.p);
-    // stats
+    // stats — auto-calculated from tk[] (Total + per-status, hide zeros)
     {
-      const s=P.addSlide(); s.background={color:C.bg}; H(s,'IT'); PT(s,MODE_CFG.itDataTitle);
-      s.addShape('rect',{x:.45,y:1.5,w:2.55,h:2.2,fill:{color:C.navy},line:{color:C.navy},shadow:SH()});
-      s.addText(it.t||'0',{x:.45,y:1.6,w:2.55,h:1.05,fontFace:'Calibri',fontSize:58,bold:true,color:C.teal,align:'center',margin:0});
-      s.addText(MODE_CFG.ticketsSubtitle,{x:.45,y:2.7,w:2.55,h:.62,fontFace:'Calibri',fontSize:11,color:'8AAEC8',align:'center',margin:0});
-      [[it.c1n||'0',it.c1l||'Category',C.teal],[it.c2n||'0',it.c2l||'Category',C.green],[it.c3n||'0',it.c3l||'Category',C.blue]].forEach((c,i)=>{
-        const cx=3.28+i*2.18;
-        s.addShape('rect',{x:cx,y:1.5,w:2,h:2.2,fill:{color:C.white},line:{color:C.bd,width:.75},shadow:SH()});
-        s.addShape('rect',{x:cx,y:1.5,w:2,h:.05,fill:{color:c[2]},line:{color:c[2]}});
-        s.addText(c[0],{x:cx,y:1.63,w:2,h:.86,fontFace:'Calibri',fontSize:36,bold:true,color:c[2],align:'center',margin:0});
-        s.addText(c[1],{x:cx,y:2.55,w:2,h:.38,fontFace:'Calibri',fontSize:10,color:C.tm,align:'center',margin:0});
+      const s = P.addSlide();
+      s.background = { color: C.bg };
+      H(s, 'IT'); PT(s, MODE_CFG.itDataTitle);
+
+      // Migrate any legacy 3-col rows for counting
+      const rows = (it.tk || []).map(r => {
+        if (Array.isArray(r) && r.length === 3) return [r[0]||'', r[2]||'', '', r[1]||''];
+        if (Array.isArray(r) && r.length >= 4)  return r.slice(0, 4);
+        return ['','','',''];
       });
+      const total = rows.length;
+
+      // Count tickets per status
+      const STATUSES = ['Resolved', 'In Progress', 'On Hold', 'Pending', 'Not Started', 'Cancelled'];
+      const STATUS_COLORS = {
+        'Resolved':    '10B981',
+        'In Progress': '3B82F6',
+        'On Hold':     'F59E0B',
+        'Pending':     '8B5CF6',
+        'Not Started': '6B7280',
+        'Cancelled':   'EF4444'
+      };
+      const byStatus = {};
+      rows.forEach(r => {
+        const st = r[3] || '';
+        if (st) byStatus[st] = (byStatus[st] || 0) + 1;
+      });
+      const activeStatuses = STATUSES.filter(st => (byStatus[st] || 0) > 0);
+
+      // Total Tickets card (left)
+      s.addShape('rect', { x: .45, y: 1.5, w: 2.4, h: 2.2, fill: { color: C.navy }, line: { color: C.navy }, shadow: SH() });
+      s.addText(String(total), { x: .45, y: 1.6, w: 2.4, h: 1.1, fontFace: 'Calibri', fontSize: 58, bold: true, color: C.teal, align: 'center', margin: 0 });
+      s.addText('Total Tickets', { x: .45, y: 2.75, w: 2.4, h: .55, fontFace: 'Calibri', fontSize: 13, color: '8AAEC8', align: 'center', margin: 0 });
+
+      // Per-status cards (only non-zero, max 3 across the top)
+      const maxCards = Math.min(activeStatuses.length, 3);
+      const cardW = 2.05, cardGap = .12;
+      const startX = 3.05;
+      activeStatuses.slice(0, maxCards).forEach((st, i) => {
+        const cx = startX + i * (cardW + cardGap);
+        const col = STATUS_COLORS[st] || '62C6D3';
+        s.addShape('rect', { x: cx, y: 1.5, w: cardW, h: 2.2, fill: { color: C.white }, line: { color: C.bd, width: .75 }, shadow: SH() });
+        s.addShape('rect', { x: cx, y: 1.5, w: cardW, h: .05, fill: { color: col }, line: { color: col } });
+        s.addText(String(byStatus[st]), { x: cx, y: 1.63, w: cardW, h: .86, fontFace: 'Calibri', fontSize: 36, bold: true, color: col, align: 'center', margin: 0 });
+        s.addText(st, { x: cx, y: 2.55, w: cardW, h: .38, fontFace: 'Calibri', fontSize: 11, color: C.tm, align: 'center', margin: 0 });
+      });
+
+      // If we have any statuses, render a pie chart on the next row
+      if (activeStatuses.length > 0 && typeof P.addChart === 'function') {
+        try {
+          const chartData = [{
+            name: 'Tickets by Status',
+            labels: activeStatuses,
+            values: activeStatuses.map(st => byStatus[st] || 0)
+          }];
+          P.charts = P.charts || { PIE: 'pie' };
+          const chartType = P.ChartType ? P.ChartType.pie : 'pie';
+          s.addChart(chartType, chartData, {
+            x: .45, y: 3.95, w: 9.1, h: 1.4,
+            chartColors: activeStatuses.map(st => STATUS_COLORS[st] || '62C6D3'),
+            showLegend: true,
+            legendPos: 'r',
+            legendFontSize: 10,
+            showPercent: true,
+            dataLabelColor: 'FFFFFF',
+            dataLabelFontSize: 10,
+            dataLabelFontBold: true
+          });
+        } catch (e) {
+          console.warn('Pie chart skipped:', e);
+          // Fallback: render a horizontal bar visualization as shapes
+          let xCursor = .45;
+          const barY = 4.2, barH = .45;
+          const widthTotal = 9.1;
+          const sumActive = activeStatuses.reduce((a, st) => a + byStatus[st], 0) || 1;
+          activeStatuses.forEach(st => {
+            const w = (byStatus[st] / sumActive) * widthTotal;
+            const col = STATUS_COLORS[st] || '62C6D3';
+            s.addShape('rect', { x: xCursor, y: barY, w, h: barH, fill: { color: col }, line: { color: col } });
+            if (w > .5) {
+              s.addText(st + ' ' + byStatus[st], { x: xCursor, y: barY, w, h: barH, fontFace: 'Calibri', fontSize: 10, bold: true, color: 'FFFFFF', align: 'center', valign: 'middle', margin: 0 });
+            }
+            xCursor += w;
+          });
+        }
+      }
     }
-    // ticket highlight (paginated at 6 per slide)
+    // ticket highlight (paginated at 6 per slide) — 4 columns
     if (it.tk?.length) {
       const PAGE = 6;
-      for (let p = 0; p < it.tk.length; p += PAGE) {
-        const chunk = it.tk.slice(p, p + PAGE);
+      // Migrate any legacy 3-col rows on the fly
+      const rows = it.tk.map(r => {
+        if (Array.isArray(r) && r.length === 3) return [r[0]||'', r[2]||'', '', r[1]||''];
+        if (Array.isArray(r) && r.length >= 4)  return r.slice(0, 4);
+        return ['','','',''];
+      });
+      for (let p = 0; p < rows.length; p += PAGE) {
+        const chunk = rows.slice(p, p + PAGE);
         const isCont = p > 0;
         const s = P.addSlide(); s.background = { color: C.white }; H(s, 'IT');
         PT(s, MODE_CFG.itHlTitle + (isCont ? ' (continued)' : ''));
-        const T = 1.46, c1 = 1.55, c2 = 5.22, c3 = 1.83, X1 = .45, X2 = X1 + c1 + .08, X3 = X2 + c2 + .08, RH = .6;
-        [[X1, c1, 'CATEGORY', C.navy], [X2, c2, 'DESCRIPTION', C.navy], [X3, c3, 'STATUS', C.green]].forEach(([x, w, l, bg]) => {
+        // 4 cols: CATEGORY | DESCRIPTION | SOLUTION | STATUS
+        const T = 1.46, c1 = 1.45, c2 = 3.55, c3 = 2.85, c4 = 1.35;
+        const X1 = .45, X2 = X1 + c1 + .06, X3 = X2 + c2 + .06, X4 = X3 + c3 + .06, RH = .68;
+        [[X1, c1, 'CATEGORY', C.navy], [X2, c2, 'DESCRIPTION', C.navy], [X3, c3, 'SOLUTION', C.navy], [X4, c4, 'STATUS', C.green]].forEach(([x, w, l, bg]) => {
           s.addShape('rect', { x, y: T, w, h: .34, fill: { color: bg }, line: { color: bg } });
           s.addText(l, { x: x + .1, y: T, w: w - .1, h: .34, fontFace: 'Calibri', fontSize: 9, bold: true, color: C.white, valign: 'middle', margin: 0 });
         });
         chunk.forEach((r, i) => {
           const y = T + .34 + i * RH, bg = i % 2 === 0 ? C.white : C.ra;
-          [[X1, c1, r[0], true], [X2, c2, r[1], false], [X3, c3, r[2], false]].forEach(([x, w, t, b]) => {
+          [[X1, c1, r[0], true,  false], [X2, c2, r[1], false, false], [X3, c3, r[2], false, false], [X4, c4, r[3], false, true]].forEach(([x, w, t, b, center]) => {
             s.addShape('rect', { x, y, w, h: RH, fill: { color: bg }, line: { color: C.bd, width: .5 } });
-            s.addText(t || '', { x: x + .1, y: y + .04, w: w - .2, h: RH - .08, fontFace: 'Calibri', fontSize: 11, bold: b, color: b ? C.td : C.tm, valign: 'middle', margin: 0 });
+            s.addText(t || '', { x: x + .1, y: y + .04, w: w - .2, h: RH - .08, fontFace: 'Calibri', fontSize: 10, bold: b, color: b ? C.td : C.tm, valign: 'middle', align: center ? 'center' : 'left', margin: 0 });
           });
         });
       }
@@ -2592,6 +2724,512 @@ async function regenerateSectionFromSource(secId) {
   }
 }
 
+
+
+// ─── JSZip lazy loader (only loads when backup/restore is used) ────
+function _loadJSZip() {
+  return new Promise((resolve, reject) => {
+    if (window.JSZip) return resolve(window.JSZip);
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+    script.onload = () => window.JSZip ? resolve(window.JSZip) : reject(new Error('JSZip failed to register'));
+    script.onerror = () => reject(new Error('JSZip CDN unreachable'));
+    document.head.appendChild(script);
+  });
+}
+
+// ─── exportArchiveAsPPTs — bulk backup: ZIP of one PPT per archived entry ───
+async function exportArchiveAsPPTs() {
+  try {
+    _showToast('⏳ Gathering archive entries…');
+
+    // Collect every archived entry across all sources
+    const entries = []; // { mode, period, secs, customSections }
+    const seen = new Set();
+    const add = (mode, period, secs, customSections) => {
+      const key = mode + '|' + (typeof _slugify === 'function' ? _slugify(period) : period);
+      if (seen.has(key)) return;
+      seen.add(key);
+      entries.push({ mode, period, secs: secs || {}, customSections: customSections || [] });
+    };
+
+    if (_serverAvailable) {
+      for (const mode of ['weekly', 'monthly', 'quarterly']) {
+        try {
+          const r = await fetchWithTimeout('/api/archive/' + mode, { method: 'GET' }, 8000);
+          if (r && r.ok) {
+            const items = await r.json();
+            const list = Array.isArray(items) ? items : (items.entries || []);
+            for (const it of list) {
+              const slug = it.slug || it.period;
+              try {
+                const r2 = await fetchWithTimeout('/api/archive/' + mode + '/' + encodeURIComponent(slug), { method: 'GET' }, 8000);
+                if (r2 && r2.ok) {
+                  const data = await r2.json();
+                  add(mode, data.period || it.period, data.sections, data._customSections);
+                }
+              } catch (e) {}
+            }
+          }
+        } catch (e) {}
+      }
+    }
+    for (const mode of ['weekly', 'monthly', 'quarterly']) {
+      try {
+        const lsAll = _lsArchiveLoadAll(mode);
+        for (const slug of Object.keys(lsAll || {})) {
+          const e = lsAll[slug];
+          if (e && e.period) add(mode, e.period, e.sections, e._customSections);
+        }
+      } catch (e) {}
+    }
+
+    if (!entries.length) {
+      _showToast('⚠ No archive entries to back up', '#F59E0B');
+      return;
+    }
+
+    _showToast('⏳ Loading PPT engine…');
+    const JSZip = await _loadJSZip();
+    const zip = new JSZip();
+
+    _showToast('⏳ Building ' + entries.length + ' PPT files…');
+
+    let done = 0;
+    for (const e of entries) {
+      try {
+        const P = new PptxGenJS();
+        P.layout = 'LAYOUT_16x9';
+        const C = { white: 'FFFFFF', navy: '0A3260', teal: '62C6D3', dark: '001428', mid: '3A4A5C', soft: 'F0F4F8' };
+
+        const cover = P.addSlide();
+        cover.background = { color: C.navy };
+        cover.addShape('rect', { x: 0, y: 0, w: .12, h: 5.625, fill: { color: C.teal }, line: { color: C.teal } });
+        cover.addText('KABi · Human Capital', { x: .5, y: 1.6, w: 9.2, h: .5, fontFace: 'Calibri', fontSize: 14, color: C.teal });
+        cover.addText(e.period, { x: .5, y: 2.15, w: 9.2, h: 1.0, fontFace: 'Calibri', fontSize: 48, bold: true, color: C.white });
+        cover.addText((e.mode || 'weekly').charAt(0).toUpperCase() + (e.mode || 'weekly').slice(1) + ' Report', { x: .5, y: 3.2, w: 9.2, h: .5, fontFace: 'Calibri', fontSize: 18, color: C.teal });
+
+        // Embed restore metadata
+        const meta = JSON.stringify({
+          _kabi_v: 2,
+          period: e.period,
+          mode: e.mode,
+          secs: e.secs,
+          _customSections: e.customSections,
+          exportedAt: new Date().toISOString()
+        });
+        cover.addNotes('KABI_DATA_V2::' + meta + '::END');
+
+        // Render a quick section summary
+        const sids = Object.keys(e.secs);
+        if (sids.length) {
+          const slide = P.addSlide();
+          slide.background = { color: C.white };
+          slide.addText('Sections Summary', { x: .45, y: .82, w: 9.1, h: .46, fontFace: 'Calibri', fontSize: 22, bold: true, color: C.dark });
+          let yPos = 1.7;
+          sids.forEach(sid => {
+            const sd = e.secs[sid] || {};
+            const counts = [(sd.kp || []).length, (sd.ac || []).length, (sd.ch || []).length, (sd.nw || []).length];
+            if (counts.every(c => c === 0) && !sd.p) return;
+            slide.addText('• ' + sid + (sd.p ? '  (' + sd.p + ')' : ''), { x: .55, y: yPos, w: 4.5, h: .3, fontFace: 'Calibri', fontSize: 12, bold: true, color: C.dark });
+            slide.addText(counts[0] + ' KPIs · ' + counts[1] + ' Activities · ' + counts[2] + ' Challenges · ' + counts[3] + ' Next', { x: 5.0, y: yPos, w: 4.5, h: .3, fontFace: 'Calibri', fontSize: 11, color: C.mid });
+            yPos += .32;
+            if (yPos > 5.0) return;
+          });
+        }
+
+        const b64 = await P.write('base64');
+        const buf = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+        const slug = (typeof _slugify === 'function') ? _slugify(e.period) : e.period.toLowerCase().replace(/\s+/g, '-');
+        const fname = e.mode + '_' + slug + '.pptx';
+        zip.file(fname, buf);
+        done++;
+      } catch (err) {
+        console.error('PPT build failed for', e.period, err);
+      }
+    }
+
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const fileName = 'kabi-archive-ppt-backup-' + new Date().toISOString().slice(0, 10) + '.zip';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(a.href); }, 100);
+    _showToast('✅ ' + done + ' PPT files backed up');
+  } catch (err) {
+    console.error('exportArchiveAsPPTs failed', err);
+    _showToast('⚠ Backup failed — see console', '#EF4444');
+  }
+}
+
+
+// ── Robust PPT metadata extractor — handles PowerPoint splitting text
+//    into multiple <a:t> runs, decodes XML entities, parses JSON.
+async function _extractKabiMetaFromZip(zip) {
+  const notesFiles = Object.keys(zip.files).filter(k => /^ppt\/notesSlides\/notesSlide\d+\.xml$/.test(k));
+  for (const nf of notesFiles) {
+    let xml;
+    try { xml = await zip.file(nf).async('string'); }
+    catch (e) { continue; }
+    // Extract every text run from <a:t>...</a:t> and concatenate
+    const texts = [];
+    const re = /<a:t[^>]*>([\s\S]*?)<\/a:t>/g;
+    let m;
+    while ((m = re.exec(xml)) !== null) texts.push(m[1]);
+    const fullText = texts.join('');
+    if (!fullText.includes('KABI_DATA_V2')) continue;
+    // Decode XML entities in the concatenated text
+    const decoded = fullText
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&');
+    const match = decoded.match(/KABI_DATA_V2::([\s\S]*?)::END/);
+    if (!match) continue;
+    try { return JSON.parse(match[1]); }
+    catch (e) {
+      console.warn('JSON parse failed in', nf, e);
+      console.warn('Decoded snippet:', match[1].slice(0, 400));
+    }
+  }
+  return null;
+}
+
+
+// ── PPT Restore Modal — guided import flow ───────────────────────
+function openRestoreModal() {
+  const m = document.getElementById('restore-modal');
+  if (!m) return;
+  m.style.display = 'flex';
+  _restoreModalUpdate();
+  document.getElementById('r-file-status').textContent = '';
+  document.getElementById('r-file-input').value = '';
+}
+function closeRestoreModal() {
+  const m = document.getElementById('restore-modal');
+  if (m) m.style.display = 'none';
+}
+function _restoreModalUpdate() {
+  const modeSel = document.querySelector('input[name="r-mode"]:checked')?.value || 'single';
+  const metaSel = document.querySelector('input[name="r-meta"]:checked')?.value || 'auto';
+  // Multi-file: enable multiple attribute on file picker
+  const fi = document.getElementById('r-file-input');
+  if (fi) {
+    if (modeSel === 'multi') fi.setAttribute('multiple', '');
+    else fi.removeAttribute('multiple');
+  }
+  // Show/hide manual override block
+  const manual = document.getElementById('r-manual-fields');
+  if (manual) manual.style.display = (metaSel === 'manual') ? 'block' : 'none';
+  // Update file label
+  const lbl = document.getElementById('r-file-label');
+  if (lbl) {
+    lbl.textContent = (metaSel === 'manual' ? '4' : '3') + '. Choose ' + (modeSel === 'multi' ? 'files' : 'file');
+  }
+}
+
+async function _restoreModalSubmit() {
+  try {
+    const fi = document.getElementById('r-file-input');
+    const files = fi.files ? Array.from(fi.files) : [];
+    if (!files.length) {
+      document.getElementById('r-file-status').textContent = '⚠ Please choose at least one file.';
+      return;
+    }
+
+    const metaSel = document.querySelector('input[name="r-meta"]:checked')?.value || 'auto';
+    let override = null;
+    if (metaSel === 'manual') {
+      const mode = document.getElementById('r-mode-sel').value;
+      const period = document.getElementById('r-period').value.trim();
+      if (!period) {
+        document.getElementById('r-file-status').textContent = '⚠ Please enter a period (e.g., May 2026).';
+        return;
+      }
+      const secs = Array.from(document.querySelectorAll('#r-sections input[type="checkbox"]:checked')).map(c => c.value);
+      override = { mode, period, secs };
+    }
+
+    document.getElementById('r-file-status').textContent = '⏳ Restoring…';
+    const result = await _restorePPTFiles(files, override);
+    let msg = '';
+    if (result.restored) msg += '✅ Restored ' + result.restored + ' entries';
+    if (result.skipped)  msg += (msg ? ' · ' : '') + '⏭ Skipped ' + result.skipped;
+    if (result.failed)   msg += (msg ? ' · ' : '') + '⚠ Failed ' + result.failed;
+    document.getElementById('r-file-status').textContent = msg || 'Done.';
+    _showToast(msg || 'Done.');
+    if (result.restored > 0) {
+      setTimeout(() => {
+        closeRestoreModal();
+        if (typeof searchArchive === 'function') searchArchive();
+      }, 800);
+    }
+  } catch (err) {
+    console.error('Restore submit failed', err);
+    document.getElementById('r-file-status').textContent = '⚠ Restore failed: ' + (err.message || err);
+    _showToast('⚠ Restore failed — see console', '#EF4444');
+  }
+}
+
+// Core restore — supports optional override { mode, period, secs[] }
+async function _restorePPTFiles(files, override) {
+  const stats = { restored: 0, skipped: 0, failed: 0, details: [] };
+  const JSZip = await _loadJSZip();
+
+  for (const file of files) {
+    try {
+      if (!file.name.toLowerCase().endsWith('.pptx')) {
+        stats.failed++; stats.details.push({ name: file.name, reason: 'Not a .pptx file' });
+        continue;
+      }
+      const buf = await file.arrayBuffer();
+      const z = await JSZip.loadAsync(buf);
+      let meta = await _extractKabiMetaFromZip(z);
+
+      // Apply override if requested
+      if (override) {
+        // If no meta found, the file might be external — synthesize from override
+        if (!meta) {
+          meta = { _kabi_v: 2, period: override.period, mode: override.mode, secs: {}, _customSections: [] };
+        } else {
+          meta = Object.assign({}, meta, { period: override.period, mode: override.mode });
+        }
+        // Filter sections to only the ones the user picked
+        if (override.secs && override.secs.length && meta.secs) {
+          const filtered = {};
+          override.secs.forEach(sid => { if (meta.secs[sid]) filtered[sid] = meta.secs[sid]; });
+          meta.secs = filtered;
+        }
+      }
+
+      if (!meta || !meta.period || !meta.mode) {
+        stats.failed++; stats.details.push({ name: file.name, reason: 'No KABi metadata in file and no override provided' });
+        continue;
+      }
+      if (!meta.secs || !Object.keys(meta.secs).length) {
+        stats.failed++; stats.details.push({ name: file.name, reason: 'No sections selected / found' });
+        continue;
+      }
+
+      // Check conflict
+      const slug = _slugify(meta.period);
+      let existing = null;
+      if (_serverAvailable) {
+        try {
+          const r = await fetchWithTimeout('/api/archive/' + meta.mode + '/' + encodeURIComponent(slug), { method: 'GET' }, 6000);
+          if (r && r.ok) existing = await r.json();
+        } catch (e) {}
+      }
+      if (!existing) existing = _lsArchiveGet(meta.mode, slug);
+
+      // If existing, identify section conflicts
+      let conflictingSections = [];
+      if (existing && existing.sections) {
+        conflictingSections = Object.keys(meta.secs).filter(sid => existing.sections[sid]);
+      }
+      if (conflictingSections.length) {
+        const ok = confirm(
+          '"' + meta.period + '" (' + meta.mode + ') already has data for these sections:\n  ' +
+          conflictingSections.join(', ') + '\n\nReplace existing section data from "' + file.name + '"?'
+        );
+        if (!ok) {
+          stats.skipped++; stats.details.push({ name: file.name, reason: 'User skipped conflict' });
+          continue;
+        }
+      }
+
+      // Merge: existing sections preserved unless overridden by this file
+      const mergedSections = Object.assign({}, existing?.sections || {}, meta.secs);
+      const savedAtMap = Object.assign({}, existing?.savedAt || {});
+      const nowIso = new Date().toISOString();
+      Object.keys(meta.secs).forEach(sid => { savedAtMap[sid] = nowIso; });
+
+      // Save the merged entry
+      let saved = false;
+      if (_serverAvailable) {
+        try {
+          const entry = {
+            period: meta.period,
+            sections: mergedSections,
+            savedAt: savedAtMap,
+            lastSavedAt: nowIso,
+            lastSavedBy: 'ppt-restore',
+            mode: meta.mode,
+            _customSections: meta._customSections || existing?._customSections || []
+          };
+          const r = await fetchWithTimeout('/api/archive/' + meta.mode + '/' + encodeURIComponent(slug), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ entry })
+          }, 10000);
+          if (r && r.ok) saved = true;
+          else console.warn('Server POST returned', r && r.status, await r?.text?.());
+        } catch (e) { console.warn('Server save failed', e); }
+      }
+      if (!saved) {
+        // LS fallback — save section by section
+        for (const [sid, sdata] of Object.entries(meta.secs)) {
+          try {
+            _lsArchiveSaveSection(meta.mode, meta.period, sid, sdata, 'ppt-restore');
+            saved = true;
+          } catch (e) { console.warn('LS save failed for', sid, e); }
+        }
+      }
+
+      if (saved) {
+        stats.restored++;
+        stats.details.push({ name: file.name, period: meta.period, mode: meta.mode, sections: Object.keys(meta.secs) });
+        // Propagate custom sections to the dashboard
+        if (Array.isArray(meta._customSections)) {
+          const have = new Set(_customSections.map(s => s.id));
+          meta._customSections.forEach(cs => {
+            if (cs && cs.id && !have.has(cs.id)) {
+              _customSections.push(cs);
+              have.add(cs.id);
+            }
+          });
+          try { _safeStorage.setItem('kabi_custom_sections', JSON.stringify(_customSections)); } catch (e) {}
+        }
+      } else {
+        stats.failed++; stats.details.push({ name: file.name, reason: 'Save failed' });
+      }
+    } catch (err) {
+      console.error('Restore file failed:', file?.name, err);
+      stats.failed++; stats.details.push({ name: file.name, reason: String(err.message || err) });
+    }
+  }
+
+  console.log('Restore details:', stats.details);
+  return stats;
+}
+
+// ─── importArchiveFromPPT — upload one (or many) PPTs and restore ───
+async function importArchiveFromPPT(event) {
+  try {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (!files.length) return;
+
+    _showToast('⏳ Loading PPT engine…');
+    const JSZip = await _loadJSZip();
+
+    const restored = [];
+    const skipped = [];
+    const failed = [];
+
+    for (const file of files) {
+      try {
+        if (!file.name.toLowerCase().endsWith('.pptx')) {
+          failed.push({ name: file.name, reason: 'Not a .pptx file' });
+          continue;
+        }
+        const buf = await file.arrayBuffer();
+        const z = await JSZip.loadAsync(buf);
+
+        // Look for the metadata in notesSlide*.xml — handle text runs
+        let meta = await _extractKabiMetaFromZip(z);
+
+        if (!meta || !meta.period || !meta.mode || !meta.secs) {
+          failed.push({ name: file.name, reason: 'No KABi metadata in this PPT' });
+          continue;
+        }
+
+        // Check if entry already exists
+        const slug = (typeof _slugify === 'function') ? _slugify(meta.period) : meta.period.toLowerCase().replace(/\s+/g, '-');
+        let exists = false;
+        if (_serverAvailable) {
+          try {
+            const r = await fetchWithTimeout('/api/archive/' + meta.mode + '/' + encodeURIComponent(slug), { method: 'GET' }, 5000);
+            if (r && r.ok) exists = true;
+          } catch (e) {}
+        }
+        if (!exists) {
+          try {
+            const lsExisting = _lsArchiveGet(meta.mode, slug);
+            if (lsExisting) exists = true;
+          } catch (e) {}
+        }
+
+        if (exists) {
+          const ok = confirm('"' + meta.period + '" (' + meta.mode + ') already exists in the archive.\n\nReplace it with the data from "' + file.name + '"?');
+          if (!ok) {
+            skipped.push({ name: file.name, period: meta.period });
+            continue;
+          }
+        }
+
+        // Save the entry — server first, LS fallback
+        let saved = false;
+        if (_serverAvailable) {
+          try {
+            const entry = {
+              period: meta.period,
+              sections: meta.secs,
+              savedAt: {},
+              lastSavedAt: new Date().toISOString(),
+              lastSavedBy: 'ppt-restore',
+              mode: meta.mode,
+              _customSections: meta._customSections || []
+            };
+            const r = await fetchWithTimeout('/api/archive/' + meta.mode + '/' + encodeURIComponent(slug), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ entry })
+            }, 10000);
+            if (r && r.ok) saved = true;
+          } catch (e) { console.warn('Server restore failed for', file.name, e); }
+        }
+        if (!saved) {
+          // LS fallback — save section-by-section
+          for (const [secId, secData] of Object.entries(meta.secs)) {
+            try {
+              _lsArchiveSaveSection(meta.mode, meta.period, secId, secData, 'ppt-restore');
+              saved = true;
+            } catch (e) {}
+          }
+        }
+
+        if (saved) {
+          restored.push({ name: file.name, period: meta.period, mode: meta.mode });
+          // Pick up custom sections from this file
+          if (Array.isArray(meta._customSections)) {
+            const haveIds = new Set(_customSections.map(s => s.id));
+            meta._customSections.forEach(cs => {
+              if (cs && cs.id && !haveIds.has(cs.id)) {
+                _customSections.push(cs);
+                haveIds.add(cs.id);
+              }
+            });
+            try { _safeStorage.setItem('kabi_custom_sections', JSON.stringify(_customSections)); } catch (e) {}
+          }
+        } else {
+          failed.push({ name: file.name, reason: 'Save failed' });
+        }
+      } catch (err) {
+        console.error('PPT restore failed for', file.name, err);
+        failed.push({ name: file.name, reason: String(err.message || err) });
+      }
+    }
+
+    let msg = '';
+    if (restored.length) msg += '✅ Restored ' + restored.length + ' entries';
+    if (skipped.length)  msg += (msg ? ' · ' : '') + '⏭ Skipped ' + skipped.length;
+    if (failed.length)   msg += (msg ? ' · ' : '') + '⚠ Failed ' + failed.length;
+    if (!msg) msg = '⚠ Nothing was restored';
+    _showToast(msg);
+
+    if (failed.length) {
+      console.warn('Failed restores:', failed);
+    }
+    if (typeof searchArchive === 'function') setTimeout(searchArchive, 400);
+  } catch (err) {
+    console.error('importArchiveFromPPT failed', err);
+    _showToast('⚠ Restore failed — see console', '#EF4444');
+  }
+}
 
 // ── exportArchive: download a JSON backup of all archive data ────────
 async function exportArchive() {
@@ -3198,6 +3836,13 @@ function _slugify(s) {
 }
 
 async function _checkPeriodArchive() {
+  // DISABLED — per user request, no duplicate-period warning is shown when
+  // adding a new update for a date that already exists in the archive.
+  // The user can freely edit and save; per-section save handlers handle the
+  // overwrite correctly. Dedup at search time (Phase 20) keeps the archive
+  // results clean.
+  return;
+  /* eslint-disable no-unreachable */
   // Skip when the user is explicitly editing an archive entry — otherwise the
   // sections they just loaded would be immediately hidden as "already archived".
   if (_isEditingArchive) return;
@@ -4543,6 +5188,143 @@ function openYearlyReport() {
   generateYearlyReport();
 }
 
+
+// ── exportYearlyToPPT: render the yearly summary as a PowerPoint deck ──
+async function exportYearlyToPPT() {
+  try {
+    if (!window._yrLastData) {
+      _showToast('⚠ Generate the report first', '#EF4444');
+      return;
+    }
+    const { allData, historyData, year } = window._yrLastData;
+    _showToast('⏳ Building yearly PowerPoint…');
+
+    const P = new PptxGenJS();
+    P.layout = 'LAYOUT_16x9';
+    const C = { white: 'FFFFFF', navy: '0A3260', teal: '62C6D3', dark: '001428', mid: '3A4A5C', soft: 'F0F4F8', border: 'D8E0E8', green: '10B981', amber: 'F59E0B' };
+
+    // Cover slide
+    {
+      const s = P.addSlide();
+      s.background = { color: C.navy };
+      s.addShape('rect', { x: 0, y: 0, w: .12, h: 5.625, fill: { color: C.teal }, line: { color: C.teal } });
+      s.addText('KABi · Human Capital', { x: .5, y: 1.6, w: 9.2, h: .5, fontFace: 'Calibri', fontSize: 14, color: C.teal, letterSpacing: 2 });
+      s.addText('Yearly Report', { x: .5, y: 2.15, w: 9.2, h: 1.0, fontFace: 'Calibri', fontSize: 54, bold: true, color: C.white });
+      s.addText(String(year), { x: .5, y: 3.2, w: 9.2, h: .5, fontFace: 'Calibri', fontSize: 24, color: C.teal });
+      s.addText('Annual summary across Weekly · Monthly · Quarterly', { x: .5, y: 3.85, w: 9.2, h: .4, fontFace: 'Calibri', fontSize: 12, color: C.white, italic: true });
+    }
+
+    // Helper: section title slide
+    const slideTitle = (title, subtitle) => {
+      const s = P.addSlide(); s.background = { color: C.white };
+      s.addShape('rect', { x: .35, y: .35, w: 9.3, h: .04, fill: { color: C.teal }, line: { color: C.teal } });
+      s.addText('KABi · ' + String(year), { x: .35, y: .12, w: 4, h: .25, fontFace: 'Calibri', fontSize: 10, color: C.mid });
+      s.addText(title, { x: .45, y: .82, w: 9.1, h: .46, fontFace: 'Calibri', fontSize: 23, bold: true, color: C.dark });
+      if (subtitle) s.addText(subtitle, { x: .45, y: 1.18, w: 9.1, h: .26, fontFace: 'Calibri', fontSize: 11, color: C.mid });
+      return s;
+    };
+
+    // Stats slide
+    {
+      const totalEntries = historyData.length;
+      const modes = {};
+      historyData.forEach(h => { modes[h.mode] = (modes[h.mode] || 0) + 1; });
+      const s = slideTitle('Annual Overview', String(totalEntries) + ' reports across all modes');
+      const cards = [
+        { lbl: 'Weekly Reports',    val: String(modes.weekly    || 0), color: C.teal,  icon: '🗓' },
+        { lbl: 'Monthly Reports',   val: String(modes.monthly   || 0), color: C.green, icon: '📋' },
+        { lbl: 'Quarterly Reports', val: String(modes.quarterly || 0), color: C.amber, icon: '📊' },
+        { lbl: 'Total Sections',    val: String(historyData.reduce((sum, h) => sum + Object.keys(h._data?.secs || {}).length, 0)), color: C.navy, icon: '📈' }
+      ];
+      cards.forEach((c, i) => {
+        const x = .45 + (i % 4) * 2.31;
+        const y = 1.8;
+        const w = 2.15;
+        s.addShape('rect', { x, y, w, h: 2.2, fill: { color: C.white }, line: { color: C.border, width: 1 } });
+        s.addShape('rect', { x, y, w, h: .08, fill: { color: c.color }, line: { color: c.color } });
+        s.addText(c.icon, { x: x + .15, y: y + .25, w: w - .3, h: .6, fontFace: 'Calibri', fontSize: 32, align: 'center' });
+        s.addText(c.val,   { x: x + .15, y: y + .95, w: w - .3, h: .65, fontFace: 'Calibri', fontSize: 38, bold: true, color: c.color, align: 'center' });
+        s.addText(c.lbl,   { x: x + .15, y: y + 1.65, w: w - .3, h: .35, fontFace: 'Calibri', fontSize: 11, color: C.mid, align: 'center' });
+      });
+    }
+
+    // Per-section aggregate slide (top 5 sections by entry count)
+    const sectionStats = {};
+    const SEC_NAMES = { ops: 'Operations', hcdev: 'HC Dev & PM', ic: 'Internal Comms', ta: 'Talent Acquisition', it: 'IT', fac: 'Facility', transformation: 'Transformation' };
+    historyData.forEach(h => {
+      Object.entries(h._data?.secs || {}).forEach(([sid, sd]) => {
+        if (!sectionStats[sid]) sectionStats[sid] = { kp: 0, ac: 0, ch: 0, nw: 0, entries: 0 };
+        sectionStats[sid].entries++;
+        sectionStats[sid].kp += (sd.kp || []).length;
+        sectionStats[sid].ac += (sd.ac || []).length;
+        sectionStats[sid].ch += (sd.ch || []).length;
+        sectionStats[sid].nw += (sd.nw || []).length;
+      });
+    });
+    {
+      const s = slideTitle('Section Activity Summary', 'Cumulative items per section across all reports');
+      const T = 1.65, RH = .42;
+      const cols = [
+        { lbl: 'Section', w: 2.5 }, { lbl: 'Entries', w: 1.0 },
+        { lbl: 'KPIs', w: 1.0 }, { lbl: 'Activities', w: 1.4 },
+        { lbl: 'Challenges', w: 1.4 }, { lbl: 'Next-Period', w: 1.6 }
+      ];
+      let X = .45;
+      cols.forEach((c, i) => {
+        s.addShape('rect', { x: X, y: T, w: c.w, h: .34, fill: { color: i === 0 ? C.navy : C.teal }, line: { color: C.navy } });
+        s.addText(c.lbl, { x: X + .1, y: T, w: c.w - .15, h: .34, fontFace: 'Calibri', fontSize: 10, bold: true, color: i === 0 ? C.white : C.navy, valign: 'middle' });
+        X += c.w;
+      });
+      const rows = Object.entries(sectionStats).sort((a, b) => b[1].entries - a[1].entries);
+      rows.forEach(([sid, st], i) => {
+        const y = T + .34 + i * RH;
+        const bg = i % 2 === 0 ? C.white : C.soft;
+        let X2 = .45;
+        const vals = [SEC_NAMES[sid] || sid, st.entries, st.kp, st.ac, st.ch, st.nw];
+        cols.forEach((c, j) => {
+          s.addShape('rect', { x: X2, y, w: c.w, h: RH, fill: { color: bg }, line: { color: C.border, width: .5 } });
+          s.addText(String(vals[j] || ''), { x: X2 + .1, y: y + .03, w: c.w - .15, h: RH - .06, fontFace: 'Calibri', fontSize: 10.5, bold: j === 0, color: j === 0 ? C.dark : C.mid, valign: 'middle' });
+          X2 += c.w;
+        });
+      });
+    }
+
+    // Per-period detail slides (most recent first), one slide per report
+    const sortedHist = historyData.slice().sort((a, b) => String(b.week || '').localeCompare(String(a.week || '')));
+    sortedHist.slice(0, 20).forEach(h => {
+      const s = slideTitle(h.week + ' — ' + (h.mode.charAt(0).toUpperCase() + h.mode.slice(1)), '');
+      let yPos = 1.6;
+      Object.entries(h._data?.secs || {}).forEach(([sid, sd]) => {
+        if (yPos > 5.0) return; // skip overflow
+        const counts = [
+          (sd.kp || []).length, (sd.ac || []).length, (sd.ch || []).length, (sd.nw || []).length
+        ];
+        if (counts.every(c => c === 0)) return;
+        s.addText('• ' + (SEC_NAMES[sid] || sid), { x: .55, y: yPos, w: 4.5, h: .3, fontFace: 'Calibri', fontSize: 12, bold: true, color: C.dark });
+        s.addText(
+          counts[0] + ' KPIs · ' + counts[1] + ' Activities · ' + counts[2] + ' Challenges · ' + counts[3] + ' Next',
+          { x: 5.0, y: yPos, w: 4.5, h: .3, fontFace: 'Calibri', fontSize: 11, color: C.mid }
+        );
+        yPos += .32;
+      });
+    });
+
+    // Closing slide
+    {
+      const s = P.addSlide(); s.background = { color: C.navy };
+      s.addText('Generated ' + new Date().toLocaleDateString(), { x: .5, y: 2.5, w: 9.2, h: .4, fontFace: 'Calibri', fontSize: 14, color: C.teal, align: 'center' });
+      s.addText('KABi · Human Capital Department · Confidential', { x: .5, y: 2.95, w: 9.2, h: .4, fontFace: 'Calibri', fontSize: 11, color: C.white, align: 'center' });
+    }
+
+    const fileName = 'KABi_Yearly_Report_' + year + '.pptx';
+    await P.writeFile({ fileName });
+    _showToast('✅ Yearly report exported');
+  } catch (err) {
+    console.error('exportYearlyToPPT error:', err);
+    _showToast('⚠ Export failed — see console', '#EF4444');
+  }
+}
+
 function closeYearlyReport() {
   document.getElementById('yr-ov').classList.remove('on');
 }
@@ -4552,19 +5334,51 @@ async function generateYearlyReport() {
   const content = document.getElementById('yr-content');
   content.innerHTML = '<div class="yr-loading"><div class="yr-spinner"></div><div class="yr-loading-text">Analyzing reports for ' + year + '...</div></div>';
 
-  // Collect data — only include if the period label contains the selected year
   const allData = {};
-  const allPeriodLabels = []; // track all period labels to detect date range
+  const allPeriodLabels = [];
+  let historyData = [];
+
+  // Helper: register a period entry once (deduped by mode+slug)
+  const seen = new Set();
+  const register = (mode, period, data) => {
+    if (!period || !period.includes(String(year))) return;
+    const key = mode + '|' + (typeof _slugify === 'function' ? _slugify(period) : period.toLowerCase());
+    if (seen.has(key)) return;
+    seen.add(key);
+    historyData.push({ mode, _data: data, week: period });
+    allPeriodLabels.push({ mode, label: period });
+    if (!allData[mode]) allData[mode] = data;
+  };
+
+  // 1) LS draft (current mode-specific draft)
   for (const mode of ['weekly', 'monthly', 'quarterly']) {
     const data = LS.get(mode);
-    if (data && data.week && data.week.includes(String(year))) {
-      allData[mode] = data;
-      allPeriodLabels.push({ mode, label: data.week });
+    if (data && data.week) register(mode, data.week, data);
+  }
+
+  // 2) Server per-section archive (the NEW data store — most user saves go here)
+  if (_serverAvailable) {
+    for (const mode of ['weekly', 'monthly', 'quarterly']) {
+      try {
+        const res = await fetch(`${API_BASE}/archive/${mode}`);
+        if (res.ok) {
+          const j = await res.json();
+          for (const e of (j.entries || [])) {
+            if (!e.period || !e.period.includes(String(year))) continue;
+            try {
+              const r2 = await fetch(`${API_BASE}/archive/${mode}/${encodeURIComponent(_slugify(e.period))}`);
+              if (r2.ok) {
+                const full = await r2.json();
+                register(mode, full.period, { week: full.period, _mode: mode, secs: full.sections || {} });
+              }
+            } catch (er) { /* skip individual fetch errors */ }
+          }
+        }
+      } catch (e) { /* skip mode */ }
     }
   }
 
-  // Also try server history — collect ALL matching entries
-  let historyData = [];
+  // 3) Server legacy history endpoint (older saves)
   if (_serverAvailable) {
     try {
       for (const mode of ['weekly', 'monthly', 'quarterly']) {
@@ -4574,10 +5388,7 @@ async function generateYearlyReport() {
           (json.history || []).forEach(h => {
             try {
               const parsed = JSON.parse(h.data || '{}');
-              if (parsed.week && parsed.week.includes(String(year))) {
-                historyData.push({ mode, ...h, _data: parsed });
-                allPeriodLabels.push({ mode, label: parsed.week });
-              }
+              register(mode, parsed.week, parsed);
             } catch(e) {}
           });
         }
@@ -4585,15 +5396,37 @@ async function generateYearlyReport() {
     } catch(e) {}
   }
 
-  // Add history data to allData
-  historyData.forEach(hd => {
-    if (!allData[hd.mode]) allData[hd.mode] = hd._data;
-  });
+  // 4) LocalStorage per-section archive (offline saves)
+  try {
+    for (const mode of ['weekly', 'monthly', 'quarterly']) {
+      const lsAll = _lsArchiveLoadAll(mode);
+      for (const slug of Object.keys(lsAll || {})) {
+        const e = lsAll[slug];
+        if (e && e.period) register(mode, e.period, { week: e.period, _mode: mode, secs: e.sections || {} });
+      }
+    }
+  } catch(e) {}
 
+  // 5) HISTORICAL_DATA — embedded preloads
+  if (typeof HISTORICAL_DATA !== 'undefined') {
+    HISTORICAL_DATA.forEach(entry => {
+      const mode = entry._mode || 'weekly';
+      register(mode, entry.week, { week: entry.week, _mode: mode, secs: entry.secs || {} });
+    });
+  }
+
+  // Render
   setTimeout(() => {
-    const report = compileYearlyReport(allData, historyData, year, allPeriodLabels);
-    content.innerHTML = report;
-  }, 600);
+    try {
+      const report = compileYearlyReport(allData, historyData, year, allPeriodLabels);
+      content.innerHTML = report;
+      // Cache last data for PPT export
+      window._yrLastData = { allData, historyData, year, allPeriodLabels };
+    } catch (err) {
+      console.error('compileYearlyReport failed', err);
+      content.innerHTML = '<div class="yr-loading" style="color:#EF4444"><div style="font-size:48px;margin-bottom:16px">⚠</div><div>Could not compile the report. Open the browser console for details.</div></div>';
+    }
+  }, 400);
 }
 
 function compileYearlyReport(allData, historyData, year, allPeriodLabels) {
@@ -5353,6 +6186,80 @@ function buildAllMainHTML() {
   return h;
 }
 
+
+// ── IT Tickets: dropdowns + auto-calc summary ───────────────────────
+const IT_CATEGORIES = ['Hardware','Software','Email','Network','Account Issues','New Joiners','Clearance','Other'];
+const IT_STATUSES = ['Resolved','In Progress','On Hold','Pending','Not Started','Cancelled'];
+const IT_STATUS_COLORS = {
+  'Resolved': '#10B981',
+  'In Progress': '#3B82F6',
+  'On Hold': '#F59E0B',
+  'Pending': '#8B5CF6',
+  'Not Started': '#6B7280',
+  'Cancelled': '#EF4444'
+};
+
+function aRitTk(vals) {
+  const tb = document.querySelector('#it-tk tbody');
+  if (!tb) return;
+  const i = tb.rows.length;
+  const v = vals || ['', '', '', ''];
+  const tr = document.createElement('tr');
+  const catOpts  = IT_CATEGORIES.map(c => `<option value="${c}"${c === v[0] ? ' selected' : ''}>${c}</option>`).join('');
+  const statOpts = IT_STATUSES.map(s => `<option value="${s}"${s === v[3] ? ' selected' : ''}>${s}</option>`).join('');
+  tr.innerHTML =
+    `<td><span class="rn">${i+1}.</span>` +
+      `<select class="ed it-cat" onchange="_recalcITStats()"><option value="">— Category —</option>${catOpts}</select></td>` +
+    `<td><input class="ed" value="${xe(v[1])}" placeholder="Description"/></td>` +
+    `<td><input class="ed" value="${xe(v[2])}" placeholder="Solution"/></td>` +
+    `<td><select class="ed it-stat" onchange="_recalcITStats()"><option value="">— Status —</option>${statOpts}</select></td>` +
+    `<td class="dc"><button class="db" onclick="dR(this,'it-tk');setTimeout(_recalcITStats,0)">✕</button></td>`;
+  tb.appendChild(tr);
+  _recalcITStats();
+}
+
+
+// ── Collect IT tickets: 4-col [category, description, solution, status] ──
+function _collectITTickets() {
+  const tbl = document.getElementById('it-tk');
+  if (!tbl) return [];
+  const out = [];
+  tbl.querySelectorAll('tbody tr').forEach(tr => {
+    const cells = [];
+    tr.querySelectorAll('td:not(.dc)').forEach(td => {
+      const sel = td.querySelector('select.ed');
+      const inp = td.querySelector('input.ed');
+      cells.push(sel ? sel.value : (inp ? inp.value : ''));
+    });
+    // Only keep rows that have at least one non-empty cell
+    if (cells.some(c => (c || '').trim() !== '')) out.push(cells);
+  });
+  return out;
+}
+
+function _recalcITStats() {
+  const tbl = document.getElementById('it-tk');
+  const box = document.getElementById('it-stats-boxes');
+  if (!tbl || !box) return;
+  const rows = tbl.querySelectorAll('tbody tr');
+  const total = rows.length;
+  const byStatus = {};
+  rows.forEach(tr => {
+    const sel = tr.querySelector('select.it-stat');
+    const st = sel ? sel.value : '';
+    if (st) byStatus[st] = (byStatus[st] || 0) + 1;
+  });
+  let html = `<div class="st s0"><div class="stnum">${total}</div><div class="stlbl">Total Tickets</div></div>`;
+  IT_STATUSES.forEach(st => {
+    const n = byStatus[st] || 0;
+    if (n > 0) {
+      const col = IT_STATUS_COLORS[st] || '';
+      html += `<div class="st"><div class="stnum" style="color:${col}">${n}</div><div class="stlbl">${st}</div></div>`;
+    }
+  });
+  box.innerHTML = html;
+}
+
 function buildITSectionHTML(sec) {
   const pl = CURRENT_MODE === 'weekly' ? 'Weekly' : CURRENT_MODE === 'monthly' ? 'Monthly' : 'Quarterly';
   return '<div class="section" id="sec-it">'
@@ -5360,16 +6267,14 @@ function buildITSectionHTML(sec) {
     + '<div><div class="sec-name">Information Technology</div>'
     + '<div class="prow">Presenter:<input class="p-inp" data-s="it" placeholder="Name"/></div></div></div>' + (CURRENT_MODE === 'monthly' || CURRENT_MODE === 'quarterly' ? '<button class="sec-regen-btn" data-sec="' + 'it' + '" onclick="regenerateSectionFromSource(\'' + 'it' + '\')" title="Refresh data from ' + (CURRENT_MODE === 'monthly' ? 'weekly entries' : 'monthly entries') + ' (Smart dedup)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg> Generate</button><button class="sec-clear-btn" data-sec="' + 'it' + '" onclick="clearSection(\'' + 'it' + '\')" title="Clear section data"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"vertical-align:-2px\"><polyline points=\"3 6 5 6 21 6\"/><path d=\"M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6\"/></svg> Clear</button><button class="sec-rename-btn" data-sec="' + 'it' + '" onclick="renameSection(\'' + 'it' + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-del-btn" data-sec="' + 'it' + '" onclick="deleteSection(\'' + 'it' + '\')" title="Delete this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Delete</button><button class="sec-save-btn" data-sec="' + 'it' + '" onclick="saveSectionToArchive(\'' + 'it' + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : (CURRENT_MODE === 'weekly' ? '<button class="sec-rename-btn" data-sec="' + 'it' + '" onclick="renameSection(\'' + 'it' + '\')" title="Rename this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Rename</button><button class="sec-del-btn" data-sec="' + 'it' + '" onclick="deleteSection(\'' + 'it' + '\')" title="Delete this section"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Delete</button><button class="sec-save-btn" data-sec="' + 'it' + '" onclick="saveSectionToArchive(\'' + 'it' + '\')" title="Save section to archive"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save</button>' : '')) + '</div>'
     + '<div class="card" id="card-it-stats"><div class="card-hdr"><span class="card-ttl">Support Tickets — ' + pl + ' Data</span>'
-    + '<button class="card-dismiss" onclick="dismissCard(\'card-it-stats\')" title="Remove">✕</button></div><div class="card-body"><div class="srow">'
-    + '<div class="st s0"><div class="stnum"><input id="it-t" placeholder="0"/></div><div class="stlbl">Total Tickets</div></div>'
-    + '<div class="st"><div class="stnum"><input id="it-c1n" placeholder="0"/></div><div class="stlbl"><input id="it-c1l" placeholder="Category"/></div></div>'
-    + '<div class="st"><div class="stnum" style="color:var(--green)"><input id="it-c2n" placeholder="0"/></div><div class="stlbl"><input id="it-c2l" placeholder="Category"/></div></div>'
-    + '<div class="st"><div class="stnum" style="color:var(--blue)"><input id="it-c3n" placeholder="0"/></div><div class="stlbl"><input id="it-c3l" placeholder="Category"/></div></div>'
-    + '</div></div></div>'
-    + '<div class="card" id="card-it-tk"><div class="card-hdr"><span class="card-ttl">Support Tickets — ' + pl + ' Highlight</span><button class="btn btn-ghost btn-sm" onclick="aR(\'it-tk\',0,3)">+ Row</button>'
+    + '<button class="card-dismiss" onclick="dismissCard(\'card-it-stats\')" title="Remove">✕</button></div>'
+    + '<div class="card-body"><div class="srow" id="it-stats-boxes"><div class="st s0"><div class="stnum">0</div><div class="stlbl">Total Tickets</div></div></div>'
+    + '<div class="it-stats-hint" style="font-size:11px;color:#94A3B8;margin-top:8px;text-align:center">Counts update automatically from the Highlight table below. Zero-count statuses are hidden.</div>'
+    + '</div></div>'
+    + '<div class="card" id="card-it-tk"><div class="card-hdr"><span class="card-ttl">Support Tickets — ' + pl + ' Highlight</span><button class="btn btn-ghost btn-sm" onclick="aRitTk()">+ Row</button>'
     + '<button class="card-dismiss" onclick="dismissCard(\'card-it-tk\')" title="Remove">✕</button></div>'
-    + '<div class="card-body"><table class="tbl" id="it-tk"><thead><tr><th style="width:18%">Category</th><th>Description</th><th style="width:13%" class="th-g">Status</th><th style="width:26px"></th></tr></thead><tbody></tbody></table>'
-    + '<button class="add-row" onclick="aR(\'it-tk\',0,3)">+ Add row</button></div></div>'
+    + '<div class="card-body"><table class="tbl" id="it-tk"><thead><tr><th style="width:14%">Category</th><th>Description</th><th>Solution</th><th style="width:13%" class="th-g">Status</th><th style="width:26px"></th></tr></thead><tbody></tbody></table>'
+    + '<button class="add-row" onclick="aRitTk()">+ Add row</button></div></div>'
     + '<div class="card"><div class="card-hdr"><span class="card-ttl">Key Points</span><button class="btn btn-ghost btn-sm" onclick="aR(\'it-kp\')">+ Row</button></div>'
     + '<div class="card-body"><table class="tbl" id="it-kp"><thead><tr><th style="width:34%">Task</th><th style="width:110px">Status</th><th>Details</th><th style="width:26px"></th></tr></thead><tbody></tbody></table>'
     + '<button class="add-row" onclick="aR(\'it-kp\')">+ Add row</button></div></div>'
@@ -5448,11 +6353,8 @@ function collectDynamic() {
     if (sec.id === 'it') {
       d.secs.it = {
         p: document.querySelector('.p-inp[data-s="it"]')?.value || '',
-        t: document.getElementById('it-t')?.value || '',
-        c1n: document.getElementById('it-c1n')?.value || '', c1l: document.getElementById('it-c1l')?.value || '',
-        c2n: document.getElementById('it-c2n')?.value || '', c2l: document.getElementById('it-c2l')?.value || '',
-        c3n: document.getElementById('it-c3n')?.value || '', c3l: document.getElementById('it-c3l')?.value || '',
-        tk: tr2('it-tk', 3), kp: kp2('it-kp'), ac: ac2('it-ac'), ch: tr2('it-ch'), nw: nw2('it-nw')
+        tk: (typeof _collectITTickets === 'function') ? _collectITTickets() : tr2('it-tk', 3),
+        kp: kp2('it-kp'), ac: ac2('it-ac'), ch: tr2('it-ch'), nw: nw2('it-nw')
       };
     } else if (sec.id === 'fac') {
       const fpg = document.getElementById('fac-pg');
@@ -5517,7 +6419,18 @@ function restoreDynamic(d) {
     if (sec.id === 'it') {
       const pi = document.querySelector('.p-inp[data-s="it"]'); if (pi) pi.value = sd.p || '';
       ['t','c1n','c1l','c2n','c2l','c3n','c3l'].forEach(k => { const el = document.getElementById('it-' + k); if (el) el.value = sd[k] || ''; });
-      (sd.tk || []).forEach(r => aR('it-tk', 0, 3, r));
+      // IT tickets: new schema is 4-col [category, description, solution, status].
+      // Legacy is 3-col [category, status, description] — migrate before render.
+      const itTbody2 = document.querySelector('#it-tk tbody');
+      if (itTbody2) itTbody2.innerHTML = '';
+      (sd.tk || []).forEach(r => {
+        let row;
+        if (Array.isArray(r) && r.length === 3)      row = [r[0]||'', r[2]||'', '', r[1]||''];
+        else if (Array.isArray(r) && r.length >= 4)  row = r.slice(0, 4);
+        else                                          row = ['','','',''];
+        if (typeof aRitTk === 'function') aRitTk(row);
+      });
+      if (typeof _recalcITStats === 'function') _recalcITStats();
       (sd.kp || []).forEach(r => aR('it-kp', 0, undefined, r));
       (sd.ac || []).forEach(v => aA('it-ac', v));
       (sd.ch || []).forEach(r => aR('it-ch', 1, undefined, r));
@@ -5852,6 +6765,7 @@ document.addEventListener('keydown', (e) => {
     </div>
     <div class="yr-topbar-right">
       <button class="yr-btn yr-btn-gen" onclick="generateYearlyReport()">⟳ Regenerate</button>
+      <button class="yr-btn yr-btn-gen" onclick="exportYearlyToPPT()">↓ Export PPT</button>
       <button class="yr-btn yr-btn-close" onclick="closeYearlyReport()">✕ Close</button>
     </div>
   </div>
@@ -5862,6 +6776,68 @@ document.addEventListener('keydown', (e) => {
         <div style="font-size:16px;font-weight:700;color:#0F172A">Yearly Report Generator</div>
         <div style="font-size:13px;color:#94A3B8;margin-top:8px">Analyzing all saved reports to compile your annual summary...</div>
       </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═════════ PPT RESTORE MODAL ═════════ -->
+<div id="restore-modal" class="restore-modal-bg" style="display:none">
+  <div class="restore-modal">
+    <div class="restore-modal-hdr">
+      <h3>⬆ Restore from PPT</h3>
+      <button class="restore-modal-x" onclick="closeRestoreModal()">✕</button>
+    </div>
+    <div class="restore-modal-body">
+
+      <div class="restore-field">
+        <label class="restore-label">1. How many files?</label>
+        <div class="restore-toggle">
+          <label class="restore-toggle-opt"><input type="radio" name="r-mode" value="single" checked onchange="_restoreModalUpdate()"/>Single file</label>
+          <label class="restore-toggle-opt"><input type="radio" name="r-mode" value="multi" onchange="_restoreModalUpdate()"/>Multiple files</label>
+        </div>
+      </div>
+
+      <div class="restore-field">
+        <label class="restore-label">2. Use the metadata embedded in each file, OR override below</label>
+        <div class="restore-toggle">
+          <label class="restore-toggle-opt"><input type="radio" name="r-meta" value="auto" checked onchange="_restoreModalUpdate()"/>Auto-detect from file</label>
+          <label class="restore-toggle-opt"><input type="radio" name="r-meta" value="manual" onchange="_restoreModalUpdate()"/>Specify date + section manually</label>
+        </div>
+      </div>
+
+      <div class="restore-field" id="r-manual-fields" style="display:none">
+        <label class="restore-label">3a. Period</label>
+        <div class="restore-row">
+          <select id="r-mode-sel" class="restore-input">
+            <option value="weekly">Weekly</option>
+            <option value="monthly" selected>Monthly</option>
+            <option value="quarterly">Quarterly</option>
+          </select>
+          <input id="r-period" class="restore-input" placeholder="e.g., May 2026"/>
+        </div>
+        <label class="restore-label" style="margin-top:12px">3b. Section(s)</label>
+        <div class="restore-sections" id="r-sections">
+          <label class="restore-chk"><input type="checkbox" value="ops"/> Operations</label>
+          <label class="restore-chk"><input type="checkbox" value="hcdev"/> HC Dev & PM</label>
+          <label class="restore-chk"><input type="checkbox" value="ic"/> Internal Comms</label>
+          <label class="restore-chk"><input type="checkbox" value="ta"/> Talent Acquisition</label>
+          <label class="restore-chk"><input type="checkbox" value="it"/> Information Technology</label>
+          <label class="restore-chk"><input type="checkbox" value="fac"/> Facility</label>
+        </div>
+        <div class="restore-hint">If selected, only these sections are saved from the file. Otherwise all sections in the file are saved.</div>
+      </div>
+
+      <div class="restore-field">
+        <label class="restore-label" id="r-file-label">3. Choose file</label>
+        <input type="file" id="r-file-input" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" class="restore-file"/>
+        <div id="r-file-status" class="restore-hint"></div>
+      </div>
+
+    </div>
+    <div class="restore-modal-ftr">
+      <button class="restore-btn-cancel" onclick="closeRestoreModal()">Cancel</button>
+      <button class="restore-btn-submit" onclick="_restoreModalSubmit()">Upload &amp; Restore</button>
     </div>
   </div>
 </div>
