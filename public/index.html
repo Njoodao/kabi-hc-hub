@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta name="kabi-version" content="KABi-HC-v31.4-20260610-1328">
+  <meta name="kabi-version" content="KABi-HC-v31.5-20260611-1210">
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>KABi HC — Report Hub</title>
@@ -1324,14 +1324,12 @@ async function startNewReport(mode) {
         return;
       }
     }
-    // Clear LS draft
-    try { LS.clear(mode); } catch (e) {}
-    // Clear server draft too (so fresh open doesn't repopulate from server)
-    if (_serverAvailable) {
-      try {
-        await fetchWithTimeout('/api/reports/' + mode, { method: 'DELETE' }, 5000);
-      } catch (e) { /* non-fatal */ }
-    }
+    // LS draft is NOT cleared — loadSaved is skipped via opts.fresh, so
+    // the form opens empty without touching stored data. Existing LS archive
+    // entries (kabi_archive_*) are NEVER touched here.
+    // (Server draft is NOT touched — openDash with fresh:true already skips
+    //  loadSaved(), and any new typing will overwrite the server draft via
+    //  autosave anyway. Touching the server here would be risky.)
     // Open dashboard in fresh mode (skips loadSaved, no auto-period)
     await openDash(mode, { fresh: true });
   } catch (err) {
